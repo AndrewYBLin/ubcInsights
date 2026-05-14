@@ -4,7 +4,7 @@ import { clearDisk, getContentFromArchives, loadTestQuery } from "../TestUtil";
 
 import { expect, use } from "chai";
 import chaiAsPromised from "chai-as-promised";
-// wow does git work? frfr
+// testing git again
 use(chaiAsPromised);
 
 export interface ITestQuery {
