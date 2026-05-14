@@ -4,7 +4,7 @@ import { clearDisk, getContentFromArchives, loadTestQuery } from "../TestUtil";
 
 import { expect, use } from "chai";
 import chaiAsPromised from "chai-as-promised";
-
+// wow does git work? frfr
 use(chaiAsPromised);
 
 export interface ITestQuery {
@@ -28,7 +28,7 @@ describe("InsightFacade", function () {
 		await clearDisk();
 	});
 
-	beforeEach(async function() {
+	beforeEach(async function () {
 		await clearDisk();
 		facade = new InsightFacade();
 	});
@@ -38,12 +38,11 @@ describe("InsightFacade", function () {
 			try {
 				await facade.addDataset("   ", sections, InsightDatasetKind.Sections);
 				expect.fail("Should have thrown!");
-			} catch(err) {
+			} catch (err) {
 				expect(err).to.be.an.instanceOf(InsightError);
 			}
 		});
 	});
-
 
 	describe("RemoteDataset", function () {
 		it("should ...", async function () {
@@ -56,9 +55,7 @@ describe("InsightFacade", function () {
 
 				// VALIDATION
 				// your asserts here
-			} catch (err) {
-
-			}
+			} catch (err) {}
 		});
 	});
 
@@ -73,9 +70,7 @@ describe("InsightFacade", function () {
 
 				// VALIDATION
 				// your asserts here
-			} catch (err) {
-
-			}
+			} catch (err) {}
 		});
 	});
 
