@@ -44,6 +44,17 @@ describe("InsightFacade", function () {
 		});
 	});
 
+	describe("AddDataset1", function () {
+		it("should reject with a _ in dataset id", async function () {
+			try {
+				await facade.addDataset("hello_monkey", sections, InsightDatasetKind.Sections);
+				expect.fail("Should have thrown!");
+			} catch (err) {
+				expect(err).to.be.an.instanceOf(InsightError);
+			}
+		});
+	});
+
 	describe("RemoteDataset", function () {
 		it("should ...", async function () {
 			try {
