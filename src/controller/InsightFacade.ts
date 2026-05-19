@@ -20,6 +20,9 @@ export default class InsightFacade implements IInsightFacade {
 		if (this.datasets.has(id)) {
 			return Promise.reject(new InsightError("ID already exists"));
 		}
+		if (kind !== "sections") {
+			return Promise.reject(new InsightError("Invalid kind"));
+		}
 
 		const zip = new JSZip();
 		let loadedZip;
