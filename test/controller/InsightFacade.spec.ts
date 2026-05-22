@@ -55,6 +55,29 @@ describe("InsightFacade", function () {
 		});
 	});
 
+	describe("AddDataset2", function () {
+		it("should reject with an actually empty dataset id", async function () {
+			try {
+				await facade.addDataset("", sections, InsightDatasetKind.Sections);
+				expect.fail("Should have thrown!");
+			} catch (err) {
+				expect(err).to.be.an.instanceOf(InsightError);
+			}
+		});
+	});
+
+	describe("AddDataset3", function () {
+		it("should reject with already added dataset id", async function () {
+			try {
+				await facade.addDataset("bigHamsters", sections, InsightDatasetKind.Sections);
+				await facade.addDataset("bigHamsters", sections, InsightDatasetKind.Sections);
+				expect.fail("Should have thrown!");
+			} catch (err) {
+				expect(err).to.be.an.instanceOf(InsightError);
+			}
+		});
+	});
+
 	describe("RemoteDataset", function () {
 		it("should ...", async function () {
 			try {
