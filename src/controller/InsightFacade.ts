@@ -103,11 +103,8 @@ export default class InsightFacade implements IInsightFacade {
 			//return Promise.reject(new InsightError("No valid sections found in dataset"));
 		}
 
-		if (!fs.existsSync(`./data`)) {
-			fs.mkdirSync(`./data`);
-		}
-
-		fs.writeFileSync(`./data/${id}.json`, JSON.stringify(sections));
+		await fs.ensureDir("./data");
+		await fs.writeJson(`./data/${id}.json`, sections);
 
 		// const newDataset: InsightDataset = {
 		// 	id: id,
@@ -130,21 +127,18 @@ export default class InsightFacade implements IInsightFacade {
 
 		this.datasets.delete(id);
 
-		if (fs.existsSync(`./data/${id}.json`)) {
-			try {
-				fs.unlinkSync(`./data/${id}.json`);
-			} catch (_err) {
-				return Promise.reject(new InsightError("failed to delete data from folder"));
-			}
+		try {
+			await fs.remove(`./data/${id}.json`);
+		} catch (_err) {
+			return Promise.reject(new InsightError("Failed to delete data"));
 		}
 		return Promise.resolve(id);
 	}
 
-	private async retrieveDataset(id: string): Promise<any[]> {
-		const content = fs.readFileSync(`./data/${id}.json`, "utf-8");
-		const sections = JSON.parse(content);
-		return sections;
-	}
+	// private async retrieveDataset(id: string): Promise<any[]> {
+	// const sections = await fs.readJson(`./data/${id}.json`);
+	// 	return sections;
+	// }
 
 	private isFilterValid(filter: any): boolean {
 		if (typeof filter !== "object" || filter === null || Array.isArray(filter)) {
@@ -167,6 +161,9 @@ export default class InsightFacade implements IInsightFacade {
 		} // else if (key === "NOT") {
 		// 	return this.isNegationValid(filter[key]);
 		// }
+		else if (key === "NOT") {
+			return this.isFilterValid(filter[key]); // NOT just wraps another filter
+		}
 
 		return false;
 	}
