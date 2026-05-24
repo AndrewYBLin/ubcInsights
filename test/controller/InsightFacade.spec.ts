@@ -383,6 +383,6 @@ describe("InsightFacade", function () {
 			};
 			return expect(facade.performQuery(query)).to.eventually.be.rejectedWith(InsightError);
 		});
-		// End of AI generated test
+		// End of AI generated test eee
 	});
 });
