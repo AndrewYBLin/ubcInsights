@@ -299,6 +299,90 @@ describe("InsightFacade", function () {
 				expect(err).to.not.be.instanceOf(InsightError);
 			}
 		});
-		// End of AI generated test
+		it("should reject a query with two keys in a filter", async function () {
+			const query = {
+				WHERE: { GT: { sections_avg: 90, sections_pass: 10 } }, // TWO keys inside GT
+				OPTIONS: { COLUMNS: ["sections_avg"] }
+			};
+			return expect(facade.performQuery(query)).to.eventually.be.rejectedWith(InsightError);
+		});
+
+		it("should reject a query referencing two different datasets", async function () {
+			// Add a second dataset first so validateKey doesn't fail on existence check
+			await facade.addDataset("other", sections, InsightDatasetKind.Sections);
+			const query = {
+				WHERE: {
+					AND: [
+						{ GT: { sections_avg: 90 } },
+						{ GT: { other_avg: 90 } } // references 'other' instead of 'sections'
+					]
+				},
+				OPTIONS: { COLUMNS: ["sections_avg"] }
+			};
+			return expect(facade.performQuery(query)).to.eventually.be.rejectedWith(InsightError);
+		});
+		it("should reject query where ORDER is not in COLUMNS", async function () {
+			const query = {
+				WHERE: {},
+				OPTIONS: {
+					COLUMNS: ["sections_avg"],
+					ORDER: "sections_dept" // dept is not in columns!
+				}
+			};
+			return expect(facade.performQuery(query)).to.eventually.be.rejectedWith(InsightError);
+		});
+
+		it("should reject query with invalid keys in OPTIONS", async function () {
+			const query = {
+				WHERE: {},
+				OPTIONS: {
+					COLUMNS: ["sections_avg"],
+					INVALID: "key" // invalid property
+				}
+			};
+			return expect(facade.performQuery(query)).to.eventually.be.rejectedWith(InsightError);
+		});
+		it("should reject OR with an empty array", async function () {
+			const query = {
+				WHERE: { OR: [] },
+				OPTIONS: { COLUMNS: ["sections_avg"] }
+			};
+			return expect(facade.performQuery(query)).to.eventually.be.rejectedWith(InsightError);
+		});
+
+		it("should reject AND that is an object instead of an array", async function () {
+			const query = {
+				WHERE: { AND: { GT: { sections_avg: 90 } } }, // Should be wrapped in []
+				OPTIONS: { COLUMNS: ["sections_avg"] }
+			};
+			return expect(facade.performQuery(query)).to.eventually.be.rejectedWith(InsightError);
+		});
+		it("should reject GT with a string value", async function () {
+			const query = {
+				WHERE: { GT: { sections_avg: "90" } }, // Value is a string
+				OPTIONS: { COLUMNS: ["sections_avg"] }
+			};
+			return expect(facade.performQuery(query)).to.eventually.be.rejectedWith(InsightError);
+		});
+		it("should reject IS with a number value", async function () {
+			const query = {
+				WHERE: { IS: { sections_dept: 123 } }, // Value is a number
+				OPTIONS: { COLUMNS: ["sections_dept"] }
+			};
+			return expect(facade.performQuery(query)).to.eventually.be.rejectedWith(InsightError);
+		});
+		it("should reject a query with an invalid filter nested inside AND", async function () {
+			const query = {
+				WHERE: {
+					AND: [
+						{ GT: { sections_avg: 90 } },
+						{ INVALID_KEY: { sections_avg: 90 } } // Nested invalid filter
+					]
+				},
+				OPTIONS: { COLUMNS: ["sections_avg"] }
+			};
+			return expect(facade.performQuery(query)).to.eventually.be.rejectedWith(InsightError);
+		});
+		// End of AI generated test eee
 	});
 });
