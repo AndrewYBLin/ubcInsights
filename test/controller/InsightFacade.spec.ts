@@ -1,4 +1,10 @@
-import { InsightError, IInsightFacade, InsightDatasetKind, InsightResult } from "../../src/controller/IInsightFacade";
+import {
+	InsightError,
+	IInsightFacade,
+	InsightDatasetKind,
+	InsightResult,
+	NotFoundError,
+} from "../../src/controller/IInsightFacade";
 import InsightFacade from "../../src/controller/InsightFacade";
 import { clearDisk, getContentFromArchives, loadTestQuery } from "../TestUtil";
 
@@ -78,6 +84,87 @@ describe("InsightFacade", function () {
 		});
 	});
 
+	describe("AddDataset4", function () {
+		it("should successfully add a valid dataset", async function () {
+			try {
+				const id: string = "pair";
+				const expected = [id];
+				const result = await facade.addDataset(id, sections, InsightDatasetKind.Sections);
+				expect(result).to.deep.equal(expected);
+			} catch (_err) {
+				expect.fail("Shouldn't have failed!");
+			}
+		});
+	});
+
+	describe("RemoveDataset1", function () {
+		it("should successfully remove an existing dataset", async function () {
+			// SETUP
+			// your setup here
+			const id: string = "ubc";
+			const content: string = await getContentFromArchives("pair.zip");
+			await facade.addDataset(id, content, InsightDatasetKind.Sections);
+			// EXECUTION
+			const result = await facade.removeDataset(id);
+
+			// VALIDATION
+			expect(result).to.equal(id);
+			// your asserts here
+			try {
+				await facade.removeDataset(id);
+				expect.fail("Should have thrown NotFoundError");
+			} catch (err) {
+				expect(err).to.be.instanceof(NotFoundError);
+			}
+		});
+	});
+
+	describe("RemoveDataset2", function () {
+		it("should successfully remove an existing dataset", async function () {
+			// SETUP
+			// your setup here
+			const id: string = "ubc";
+			const content: string = await getContentFromArchives("pair.zip");
+			await facade.addDataset(id, content, InsightDatasetKind.Sections);
+			// EXECUTION
+			await facade.removeDataset(id);
+			try {
+				await facade.removeDataset(id);
+				expect.fail("Should have thrown NotFoundError");
+			} catch (err) {
+				expect(err).to.be.instanceof(NotFoundError);
+			}
+		});
+	});
+
+	describe("RemoveDataset3", function () {
+		it("should throw InsightError for invalid '_' in id", async function () {
+			// SETUP
+			// your setup here
+			const id: string = "ubc";
+			const content: string = await getContentFromArchives("pair.zip");
+			await facade.addDataset(id, content, InsightDatasetKind.Sections);
+			// EXECUTION
+			try {
+				await facade.removeDataset("my_dataset");
+				expect.fail("Should have thrown InsightError");
+			} catch (err) {
+				expect(err).to.be.instanceof(InsightError);
+			}
+		});
+	});
+
+	describe("RemoveDataset4", function () {
+		it("should fail to remove a dataset that was never added", async function () {
+			try {
+				await facade.removeDataset("randomID");
+				expect.fail("Should have thrown NotFoundError");
+			} catch (err) {
+				expect(err).to.be.instanceOf(NotFoundError);
+			}
+		});
+	});
+
 	describe("RemoteDataset", function () {
 		it("should ...", async function () {
 			try {
@@ -94,17 +181,41 @@ describe("InsightFacade", function () {
 	});
 
 	describe("ListDataset", function () {
-		it("should ...", async function () {
+		it("should list no datasets", async function () {
 			try {
 				// SETUP
 				// your setup here
 
 				// EXECUTION
 				const datasetList = await facade.listDatasets();
-
 				// VALIDATION
+				expect(datasetList.length).to.equal(0);
 				// your asserts here
-			} catch (err) {}
+			} catch (_err) {
+				expect.fail("Shouldn't have failed");
+			}
+		});
+	});
+
+	describe("ListDataset1", function () {
+		it("should list no datasets", async function () {
+			try {
+				// SETUP
+				// your setup here
+				const id: string = "ubc";
+				const content: string = await getContentFromArchives("pair.zip");
+				await facade.addDataset(id, content, InsightDatasetKind.Sections);
+				// EXECUTION
+				const datasetList = await facade.listDatasets();
+				// VALIDATION
+				expect(datasetList.length).to.equal(1);
+				expect(datasetList[0].id).to.equal("ubc");
+				expect(datasetList[0].kind).to.equal(InsightDatasetKind.Sections);
+				expect(datasetList[0].numRows).to.be.greaterThan(0);
+				// your asserts here
+			} catch (_err) {
+				expect.fail("Shouldn't have failed");
+			}
 		});
 	});
 
@@ -167,5 +278,27 @@ describe("InsightFacade", function () {
 		// The relative path to the query file must be given in square brackets.
 		it("[valid/simple.json] SELECT dept, avg WHERE avg > 97", checkQuery);
 		it("[invalid/invalid.json] Query missing WHERE", checkQuery);
+		// Start of AI generated test
+		it("should validate a complex but syntactically correct query", async function () {
+			const query = {
+				WHERE: {
+					AND: [
+						{ GT: { sections_avg: 90 } },
+						{ IS: { sections_dept: "cpsc" } } // This triggers the new SComparison logic!
+					]
+				},
+				OPTIONS: {
+					COLUMNS: ["sections_avg", "sections_dept"],
+					ORDER: "sections_avg"
+				},
+			};
+			try {
+				await facade.performQuery(query);
+			} catch (err) {
+				// We want it to reach the "unimplemented" error, NOT an InsightError
+				expect(err).to.not.be.instanceOf(InsightError);
+			}
+		});
+		// End of AI generated test
 	});
 });
