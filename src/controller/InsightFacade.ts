@@ -140,87 +140,6 @@ export default class InsightFacade implements IInsightFacade {
 	// 	return sections;
 	// }
 
-	private isFilterValid(filter: any): boolean {
-		if (typeof filter !== "object" || filter === null || Array.isArray(filter)) {
-			return false;
-		}
-		const keys = Object.keys(filter);
-
-		if (keys.length !== 1) {
-			return false;
-		}
-
-		const key = keys[0];
-
-		if (key === "AND" || key === "OR") {
-			return this.isLogicComparisonValid(filter[key]);
-		} else if (key === "GT" || key === "LT" || key === "EQ") {
-			return this.isMComparisonValid(filter[key]);
-		} else if (key === "IS") {
-			return this.isSComparisonValid(filter[key]);
-		} // else if (key === "NOT") {
-		// 	return this.isNegationValid(filter[key]);
-		// }
-		else if (key === "NOT") {
-			return this.isFilterValid(filter[key]); // NOT just wraps another filter
-		}
-
-		return false;
-	}
-
-	private isQueryValid(query: any): boolean {
-		const keys = Object.keys(query);
-		if (keys.length !== 2 || !keys.includes("WHERE") || !keys.includes("OPTIONS")) {
-			return false;
-		}
-		if (Object.keys(query.WHERE).length > 0) {
-			if (!this.isFilterValid(query.WHERE)) {
-				return false;
-			}
-		}
-		if (!this.isOptionsValid(query.OPTIONS)) {
-			return false;
-		}
-
-		return true;
-	}
-
-	private isOptionsValid(options: any): boolean {
-		// 1. Basic check: is it an object?
-		if (typeof options !== "object" || options === null || Array.isArray(options)) {
-			return false;
-		}
-
-		// 2. Validate COLUMNS (Mandatory)
-		if (!Object.keys(options).includes("COLUMNS") || !Array.isArray(options.COLUMNS) || options.COLUMNS.length === 0) {
-			return false;
-		}
-
-		// 3. Check every key in COLUMNS
-		for (const columnKey of options.COLUMNS) {
-			if (!this.validateKey(columnKey)) {
-				return false;
-			}
-		}
-
-		// 4. Validate ORDER (Optional)
-		if (Object.keys(options).includes("ORDER")) {
-			const orderKey = options.ORDER;
-			// ORDER must be a string and it MUST be one of the keys in COLUMNS
-			if (typeof orderKey !== "string" || !options.COLUMNS.includes(orderKey)) {
-				return false;
-			}
-		}
-
-		// 5. Ensure no extra keys are in OPTIONS (like 'WHERE' inside 'OPTIONS')
-		const validOptionsKeys = ["COLUMNS", "ORDER"];
-		if (Object.keys(options).some((k) => !validOptionsKeys.includes(k))) {
-			return false;
-		}
-
-		return true;
-	}
-
 	private validateKey(key: any, type?: "mfield" | "sfield"): boolean {
 		// 1. Must be a string
 		if (typeof key !== "string") return false;
@@ -307,6 +226,19 @@ export default class InsightFacade implements IInsightFacade {
 		return this.validateKey(skey, "sfield");
 	}
 
+	private isNegationValid(notVal: any): boolean {
+		if (typeof notVal !== "object" || notVal === null || Array.isArray(notVal)) {
+			return false;
+		}
+
+		const keys = Object.keys(notVal);
+		if (keys.length !== 1) {
+			return false;
+		}
+
+		return this.isFilterValid(notVal);
+	}
+
 	public async performQuery(query: unknown): Promise<InsightResult[]> {
 		// TODO: Remove this once you implement the methods!
 		this.currentQueryId = "";
@@ -320,6 +252,84 @@ export default class InsightFacade implements IInsightFacade {
 		// const data = await this.retrieveDataset(id);
 
 		throw new Error(`InsightFacadeImpl::performQuery() is unimplemented! - query=${query};`);
+	}
+
+	private isQueryValid(query: any): boolean {
+		const keys = Object.keys(query);
+		if (keys.length !== 2 || !keys.includes("WHERE") || !keys.includes("OPTIONS")) {
+			return false;
+		}
+		if (Object.keys(query.WHERE).length > 0) {
+			if (!this.isFilterValid(query.WHERE)) {
+				return false;
+			}
+		}
+		if (!this.isOptionsValid(query.OPTIONS)) {
+			return false;
+		}
+
+		return true;
+	}
+
+	private isFilterValid(filter: any): boolean {
+		if (typeof filter !== "object" || filter === null || Array.isArray(filter)) {
+			return false;
+		}
+		const keys = Object.keys(filter);
+
+		if (keys.length !== 1) {
+			return false;
+		}
+
+		const key = keys[0];
+
+		if (key === "AND" || key === "OR") {
+			return this.isLogicComparisonValid(filter[key]);
+		} else if (key === "GT" || key === "LT" || key === "EQ") {
+			return this.isMComparisonValid(filter[key]);
+		} else if (key === "IS") {
+			return this.isSComparisonValid(filter[key]);
+		} else if (key === "NOT") {
+			return this.isNegationValid(filter[key]);
+		}
+
+		return false;
+	}
+
+	private isOptionsValid(options: any): boolean {
+		// 1. Basic check: is it an object?
+		if (typeof options !== "object" || options === null || Array.isArray(options)) {
+			return false;
+		}
+
+		// 2. Validate COLUMNS (Mandatory)
+		if (!Object.keys(options).includes("COLUMNS") || !Array.isArray(options.COLUMNS) || options.COLUMNS.length === 0) {
+			return false;
+		}
+
+		// 3. Check every key in COLUMNS
+		for (const columnKey of options.COLUMNS) {
+			if (!this.validateKey(columnKey)) {
+				return false;
+			}
+		}
+
+		// 4. Validate ORDER (Optional)
+		if (Object.keys(options).includes("ORDER")) {
+			const orderKey = options.ORDER;
+			// ORDER must be a string and it MUST be one of the keys in COLUMNS
+			if (typeof orderKey !== "string" || !options.COLUMNS.includes(orderKey)) {
+				return false;
+			}
+		}
+
+		// 5. Ensure no extra keys are in OPTIONS (like 'WHERE' inside 'OPTIONS')
+		const validOptionsKeys = ["COLUMNS", "ORDER"];
+		if (Object.keys(options).some((k) => !validOptionsKeys.includes(k))) {
+			return false;
+		}
+
+		return true;
 	}
 
 	public async listDatasets(): Promise<InsightDataset[]> {
