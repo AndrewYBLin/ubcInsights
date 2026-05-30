@@ -174,6 +174,7 @@ export default class InsightFacade implements IInsightFacade {
 
 	public async removeDataset(id: string): Promise<string> {
 		// TODO: Remove this once you implement the methods!
+		await this.initializeDatasets();
 		if (id === "" || id.includes("_") || id.trim().length === 0) {
 			return Promise.reject(new InsightError("Invalid id"));
 		}
@@ -481,6 +482,7 @@ export default class InsightFacade implements IInsightFacade {
 	public async performQuery(query: unknown): Promise<InsightResult[]> {
 		// TODO: Remove this once you implement the methods!
 		this.currentQueryId = "";
+		await this.initializeDatasets();
 		if (typeof query !== "object" || query === null || Array.isArray(query)) {
 			return Promise.reject(new InsightError("Query must be a non-null object"));
 		}
