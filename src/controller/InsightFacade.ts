@@ -21,12 +21,15 @@ export default class InsightFacade implements IInsightFacade {
 	constructor() {
 		this.datasets = new Map<string, InsightDataset>();
 		this.currentQueryId = "";
-		this.initializeDatasets();
 	}
 
-	private initializeDatasets() {
-		if (fs.existsSync("./data")) {
-			const files = fs.readdirSync("./data");
+	private async initializeDatasets(): Promise<void> {
+		if (this.datasets.size > 0) {
+			return;
+		}
+
+		if (await fs.pathExists("./data")) {
+			const files = await fs.readdir("./data");
 			for (const fileName of files) {
 				// fileName is "ubc.json"
 				if (fileName.endsWith(".json")) {
@@ -447,7 +450,6 @@ export default class InsightFacade implements IInsightFacade {
 		return true;
 	}
 
-	// eslint-disable-next-line @ubccpsc310/descriptive/max-lines
 	public async performQuery(query: unknown): Promise<InsightResult[]> {
 		// TODO: Remove this once you implement the methods!
 		this.currentQueryId = "";
@@ -504,7 +506,7 @@ export default class InsightFacade implements IInsightFacade {
 
 	public async listDatasets(): Promise<InsightDataset[]> {
 		// TODO: Remove this once you implement the methods!
-		const datasetList: InsightDataset[] = Array.from(this.datasets.values());
-		return datasetList;
+		await this.initializeDatasets();
+		return Array.from(this.datasets.values());
 	}
 }
