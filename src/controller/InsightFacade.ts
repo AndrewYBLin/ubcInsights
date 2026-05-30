@@ -30,23 +30,51 @@ export default class InsightFacade implements IInsightFacade {
 
 		if (await fs.pathExists("./data")) {
 			const files = await fs.readdir("./data");
-			for (const fileName of files) {
-				// fileName is "ubc.json"
-				if (fileName.endsWith(".json")) {
-					const id = fileName.replace(".json", "");
-					try {
-						const data = await fs.readJson(`./data/${fileName}`);
-						this.datasets.set(id, {
-							id: id,
-							kind: InsightDatasetKind.Sections,
-							numRows: data.length,
-						});
-					} catch (_err) {
-						// If a file is corrupted, we just skip it
-						continue;
-					}
+			const jsonFiles = files.filter((file) => file.endsWith(".json"));
+
+			// 1. Create the "List of IOUs"
+			const readPromises = jsonFiles.map(async (fileName) => {
+				return fs.readJson(`./data/${fileName}`).then((data) => {
+					return {
+						id: fileName.replace(".json", ""),
+						numRows: data.length,
+					};
+				});
+			});
+			// 2. Wait for all files to be read in parallel
+			try {
+				const results = await Promise.all(readPromises);
+
+				// 3. Update the internal Map with the results
+				for (const res of results) {
+					this.datasets.set(res.id, {
+						id: res.id,
+						kind: InsightDatasetKind.Sections,
+						numRows: res.numRows,
+					});
 				}
+			} catch (_err) {
+				// If one file fails or is corrupted, Promise.all might reject.
+				// You can handle individual failures inside the .map if needed.
 			}
+
+			// for (const fileName of files) {
+			// 	// fileName is "ubc.json"
+			// 	if (fileName.endsWith(".json")) {
+			// 		const id = fileName.replace(".json", "");
+			// 		try {
+			// 			const data = await fs.readJson(`./data/${fileName}`);
+			// 			this.datasets.set(id, {
+			// 				id: id,
+			// 				kind: InsightDatasetKind.Sections,
+			// 				numRows: data.length,
+			// 			});
+			// 		} catch (_err) {
+			// 			// If a file is corrupted, we just skip it
+			// 			continue;
+			// 		}
+			// 	}
+			// }
 		}
 	}
 
