@@ -5,6 +5,7 @@ import {
 	InsightResult,
 	InsightError,
 	NotFoundError,
+	ResultTooLargeError,
 } from "./IInsightFacade";
 import JSZip from "jszip";
 import * as fs from "fs-extra";
@@ -20,6 +21,30 @@ export default class InsightFacade implements IInsightFacade {
 	constructor() {
 		this.datasets = new Map<string, InsightDataset>();
 		this.currentQueryId = "";
+		this.initializeDatasets();
+	}
+
+	private initializeDatasets() {
+		if (fs.existsSync("./data")) {
+			const files = fs.readdirSync("./data");
+			for (const fileName of files) {
+				// fileName is "ubc.json"
+				if (fileName.endsWith(".json")) {
+					const id = fileName.replace(".json", "");
+					try {
+						const data = fs.readJsonSync(`./data/${fileName}`);
+						this.datasets.set(id, {
+							id: id,
+							kind: InsightDatasetKind.Sections,
+							numRows: data.length,
+						});
+					} catch (_err) {
+						// If a file is corrupted, we just skip it
+						continue;
+					}
+				}
+			}
+		}
 	}
 
 	private async processZipFiles(coursesFolder: JSZip): Promise<any[]> {
@@ -140,6 +165,23 @@ export default class InsightFacade implements IInsightFacade {
 	// 	return sections;
 	// }
 
+	private overallNumber = 1900;
+	private resultLimit = 5000;
+
+	// Mapping for internal data keys
+	private fieldToKey: { [key: string]: string } = {
+		avg: "Avg",
+		pass: "Pass",
+		fail: "Fail",
+		audit: "Audit",
+		year: "Year",
+		dept: "Subject",
+		id: "Course",
+		instructor: "Professor",
+		title: "Title",
+		uuid: "id",
+	};
+
 	private validateKey(key: any, type?: "mfield" | "sfield"): boolean {
 		// 1. Must be a string
 		if (typeof key !== "string") return false;
@@ -161,7 +203,6 @@ export default class InsightFacade implements IInsightFacade {
 
 		// 4. Dataset Existence: Check if you actually have this data
 		if (!this.datasets.has(id)) return false;
-
 		// 5. Field Check: Match against the EBNF lists
 		const mfields = ["avg", "pass", "fail", "audit", "year"];
 		const sfields = ["dept", "id", "instructor", "title", "uuid"];
@@ -196,16 +237,22 @@ export default class InsightFacade implements IInsightFacade {
 	}
 
 	private isMComparisonValid(mcomp: any): boolean {
-		if (typeof mcomp !== "object" || mcomp === null) return false;
+		if (typeof mcomp !== "object" || mcomp === null) {
+			return false;
+		}
 
 		const keys = Object.keys(mcomp);
-		if (keys.length !== 1) return false;
+		if (keys.length !== 1) {
+			return false;
+		}
 
 		const mkey = keys[0]; // e.g., "sections_avg"
 		const val = mcomp[mkey];
 
 		// Check 1: Is the value a number?
-		if (typeof val !== "number") return false;
+		if (typeof val !== "number") {
+			return false;
+		}
 
 		// Check 2: Is the key format valid (id_field)?
 		// Check 3: Is the field a valid mfield (avg, pass, etc.)?
@@ -239,19 +286,87 @@ export default class InsightFacade implements IInsightFacade {
 		return this.isFilterValid(notVal);
 	}
 
-	public async performQuery(query: unknown): Promise<InsightResult[]> {
-		// TODO: Remove this once you implement the methods!
-		this.currentQueryId = "";
-		if (typeof query !== "object" || query === null || Array.isArray(query)) {
-			return Promise.reject(new InsightError("Query must be a non-null object"));
+	private isSectionValid(section: any, filter: any): boolean {
+		const key = Object.keys(filter)[0];
+		const content = filter[key];
+
+		switch (key) {
+			case "AND":
+				// Every filter in the list must be true
+				return content.every((subFilter: any) => this.isSectionValid(section, subFilter));
+			case "OR":
+				// At least one filter in the list must be true
+				return content.some((subFilter: any) => this.isSectionValid(section, subFilter));
+			case "NOT":
+				// Invert the result of the sub-filter
+				return !this.isSectionValid(section, content);
+			case "GT":
+				return this.handleMComp(section, content, (a, b) => a > b);
+			case "LT":
+				return this.handleMComp(section, content, (a, b) => a < b);
+			case "EQ":
+				return this.handleMComp(section, content, (a, b) => a === b);
+			case "IS":
+				return this.handleSComp(section, content);
+			default:
+				// If WHERE is empty, the EBNF usually implies everything matches
+				return true;
+		}
+	}
+
+	private handleMComp(section: any, comparison: any, op: (a: number, b: number) => boolean): boolean {
+		const queryKey = Object.keys(comparison)[0]; // e.g., "sections_avg"
+		const targetValue = comparison[queryKey]; // e.g., 90
+		const field = queryKey.split("_")[1]; // e.g., "avg"
+
+		// Convert section "Year" to number if needed (some datasets use strings for years)
+		let sectionValue = section[this.fieldToKey[field]];
+		if (field === "year") {
+			sectionValue = section.Section === "overall" ? this.overallNumber : parseInt(sectionValue, 10);
 		}
 
-		if (!this.isQueryValid(query)) {
-			return Promise.reject(new InsightError("Invalid Query"));
-		}
-		// const data = await this.retrieveDataset(id);
+		return op(sectionValue, targetValue);
+	}
 
-		throw new Error(`InsightFacadeImpl::performQuery() is unimplemented! - query=${query};`);
+	private handleSComp(section: any, comparison: any): boolean {
+		const queryKey = Object.keys(comparison)[0];
+		const field = queryKey.split("_")[1];
+		const inputString = comparison[queryKey];
+		const sectionValue = String(section[this.fieldToKey[field]]);
+
+		// Escape regex special characters except our asterisk
+		let regString = inputString.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+		// Replace '*' with '.*' (the regex equivalent)
+		regString = "^" + regString.replace(/\*/g, ".*") + "$";
+
+		const regex = new RegExp(regString);
+		return regex.test(sectionValue);
+	}
+
+	private transformToResult(section: any, columns: string[]): InsightResult {
+		const result: InsightResult = {};
+
+		for (const columnKey of columns) {
+			// columnKey is like "sections_avg"
+			const field = columnKey.split("_")[1]; // "avg"
+			const dataKey = this.fieldToKey[field]; // "Avg"
+
+			let value = section[dataKey];
+
+			// Apply the "overall" year logic if necessary
+			if (field === "year") {
+				value = section.Section === "overall" ? this.overallNumber : parseInt(value, 10);
+			}
+
+			// Ensure UUIDs are strings and other types match InsightResult
+			if (field === "uuid") {
+				value = String(value);
+			}
+
+			result[columnKey] = value;
+		}
+
+		return result;
 	}
 
 	private isQueryValid(query: any): boolean {
@@ -330,6 +445,61 @@ export default class InsightFacade implements IInsightFacade {
 		}
 
 		return true;
+	}
+
+	// eslint-disable-next-line @ubccpsc310/descriptive/max-lines
+	public async performQuery(query: unknown): Promise<InsightResult[]> {
+		// TODO: Remove this once you implement the methods!
+		this.currentQueryId = "";
+		if (typeof query !== "object" || query === null || Array.isArray(query)) {
+			return Promise.reject(new InsightError("Query must be a non-null object"));
+		}
+
+		if (!this.isQueryValid(query)) {
+			return Promise.reject(new InsightError("Invalid Query"));
+		}
+		// const data = await this.retrieveDataset(id);
+
+		const queryObj = query as any;
+
+		const data = await this.loadDatasetFromDisk(this.currentQueryId);
+
+		const filteredResults = data.filter((section) => {
+			if (Object.keys(queryObj.WHERE).length === 0) {
+				return true;
+			}
+			return this.isSectionValid(section, queryObj.WHERE);
+		});
+
+		if (filteredResults.length > this.resultLimit) {
+			throw new ResultTooLargeError("Result too large (> 5000)");
+		}
+
+		const results: InsightResult[] = filteredResults.map((section) => {
+			return this.transformToResult(section, queryObj.OPTIONS.COLUMNS);
+		});
+
+		if (queryObj.OPTIONS.ORDER) {
+			const orderKey = queryObj.OPTIONS.ORDER;
+			results.sort((a, b) => {
+				if (a[orderKey] > b[orderKey]) return 1;
+				if (a[orderKey] < b[orderKey]) return -1;
+				return 0;
+			});
+		}
+
+		return results;
+	}
+
+	private async loadDatasetFromDisk(id: string): Promise<any[]> {
+		try {
+			const path = `./data/${id}.json`;
+			// fs.readJson automatically parses the JSON string into a JS object/array
+			return await fs.readJson(path);
+		} catch (_err) {
+			// This handles cases where the file might be missing or corrupted
+			throw new InsightError(`Could not read dataset ${id} from disk`);
+		}
 	}
 
 	public async listDatasets(): Promise<InsightDataset[]> {
