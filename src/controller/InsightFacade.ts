@@ -35,7 +35,7 @@ export default class InsightFacade implements IInsightFacade {
 				if (fileName.endsWith(".json")) {
 					const id = fileName.replace(".json", "");
 					try {
-						const data = fs.readJsonSync(`./data/${fileName}`);
+						const data = await fs.readJson(`./data/${fileName}`);
 						this.datasets.set(id, {
 							id: id,
 							kind: InsightDatasetKind.Sections,
