@@ -102,6 +102,7 @@ export default class InsightFacade implements IInsightFacade {
 
 	public async addDataset(id: string, content: string, kind: InsightDatasetKind): Promise<string[]> {
 		// TODO: Remove this once you implement the methods!
+		await this.initializeDatasets();
 		if (id === "" || id.includes("_") || id.trim().length === 0) {
 			return Promise.reject(new InsightError("Invalid id"));
 		}
