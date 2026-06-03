@@ -17,7 +17,7 @@ import * as fs from "fs-extra";
 export default class InsightFacade implements IInsightFacade {
 	private datasets: Map<string, InsightDataset>;
 	private currentQueryId: string;
-	// mann
+	// TESTING IF GIT DIDN'T BREAK
 	constructor() {
 		this.datasets = new Map<string, InsightDataset>();
 		this.currentQueryId = "";
