@@ -1,0 +1,10 @@
+{
+	"title": "Query missing WHERE",
+	"input": {
+		"OPTIONS": {
+			"COLUMNS": ["sections_avg"]
+		}
+	},
+	"errorExpected": true,
+	"expected": "InsightError"
+}
