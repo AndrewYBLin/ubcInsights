@@ -11,147 +11,15 @@ import JSZip from "jszip";
 import * as fs from "fs-extra";
 import * as parse5 from "parse5";
 
-/**
- * This is the main programmatic entry point for the project.
- * Method documentation is in IInsightFacade
- *
- */
 export default class InsightFacade implements IInsightFacade {
 	private datasets: Map<string, InsightDataset>;
 	private currentQueryId: string;
-	// TESTING IF GIT DIDN'T BREAK
-	constructor() {
-		this.datasets = new Map<string, InsightDataset>();
-		this.currentQueryId = "";
-	}
 
-	private async initializeDatasets(): Promise<void> {
-		if (this.datasets.size > 0) {
-			return;
-		}
+	private sectionsMFields = ["avg", "pass", "fail", "audit", "year"];
+	private sectionsSFields = ["dept", "id", "instructor", "title", "uuid"];
+	private roomsMFields = ["lat", "lon", "seats"];
+	private roomsSFields = ["fullname", "shortname", "number", "name", "address", "type", "furniture", "href"];
 
-		if (await fs.pathExists("./data")) {
-			const files = await fs.readdir("./data");
-			const jsonFiles = files.filter((file) => file.endsWith(".json"));
-
-			// 1. Create the "List of IOUs"
-			const readPromises = jsonFiles.map(async (fileName) => {
-				return fs.readJson(`./data/${fileName}`).then((data) => {
-					return {
-						id: fileName.replace(".json", ""),
-						numRows: data.length,
-					};
-				});
-			});
-			// 2. Wait for all files to be read in parallel
-			try {
-				const results = await Promise.all(readPromises);
-
-				// 3. Update the internal Map with the results
-				for (const res of results) {
-					this.datasets.set(res.id, {
-						id: res.id,
-						kind: InsightDatasetKind.Sections,
-						numRows: res.numRows,
-					});
-				}
-			} catch (_err) {
-				// If one file fails or is corrupted, Promise.all might reject.
-				// You can handle individual failures inside the .map if needed.
-			}
-
-			// for (const fileName of files) {
-			// 	// fileName is "ubc.json"
-			// 	if (fileName.endsWith(".json")) {
-			// 		const id = fileName.replace(".json", "");
-			// 		try {
-			// 			const data = await fs.readJson(`./data/${fileName}`);
-			// 			this.datasets.set(id, {
-			// 				id: id,
-			// 				kind: InsightDatasetKind.Sections,
-			// 				numRows: data.length,
-			// 			});
-			// 		} catch (_err) {
-			// 			// If a file is corrupted, we just skip it
-			// 			continue;
-			// 		}
-			// 	}
-			// }
-		}
-	}
-
-	public async addDataset(id: string, content: string, kind: InsightDatasetKind): Promise<string[]> {
-		// validate id and content
-		await this.initializeDatasets();
-		if (id === "" || id.includes("_") || id.trim().length === 0) {
-			return Promise.reject(new InsightError("Invalid id"));
-		}
-		if (this.datasets.has(id)) {
-			return Promise.reject(new InsightError("ID already exists"));
-		}
-		if (content === null || content === undefined) {
-			throw new InsightError("No content provided");
-		}
-
-		// get course files
-		const zip = await JSZip.loadAsync(content, { base64: true });
-		let rows: any[];
-
-		if (kind === InsightDatasetKind.Sections) {
-			rows = await this.parseSections(zip);
-		} else if (kind === InsightDatasetKind.Rooms) {
-			rows = await this.parseRooms(zip);
-		} else {
-			throw new InsightError("Error: Invalid dataset kind");
-		}
-
-		// no valid found in dataset
-		if (rows.length === 0) {
-			throw new InsightError("Error: No valid rows found in dataset");
-		}
-
-		await fs.ensureDir("./data");
-		await fs.writeJson(`./data/${id}.json`, rows);
-
-		// const newDataset: InsightDataset = {
-		// 	id: id,
-		// 	kind: kind,
-		// 	numRows: sections.length,
-		// };
-		this.datasets.set(id, { id: id, kind: kind, numRows: rows.length });
-
-		return Array.from(this.datasets.keys());
-	}
-
-	public async removeDataset(id: string): Promise<string> {
-		// TODO: Remove this once you implement the methods!
-		await this.initializeDatasets();
-		if (id === "" || id.includes("_") || id.trim().length === 0) {
-			return Promise.reject(new InsightError("Invalid id"));
-		}
-		if (!this.datasets.has(id)) {
-			return Promise.reject(new NotFoundError("id not found"));
-		}
-
-		this.datasets.delete(id);
-
-		try {
-			await fs.remove(`./data/${id}.json`);
-		} catch (_err) {
-			return Promise.reject(new InsightError("Failed to delete data"));
-		}
-		return Promise.resolve(id);
-	}
-
-	// private async retrieveDataset(id: string): Promise<any[]> {
-	// const sections = await fs.readJson(`./data/${id}.json`);
-	// 	return sections;
-	// }
-
-	private overallNumber = 1900;
-	private resultLimit = 5000;
-
-	// Mapping for internal data keys
 	private fieldToKey: { [key: string]: string } = {
 		avg: "Avg",
 		pass: "Pass",
@@ -163,298 +31,181 @@ export default class InsightFacade implements IInsightFacade {
 		instructor: "Professor",
 		title: "Title",
 		uuid: "id",
+		// Rooms mappings (add your exact fields here when integrating your rooms data)
+		lat: "lat",
+		lon: "lon",
+		seats: "seats",
+		fullname: "fullname",
+		shortname: "shortname",
+		number: "number",
+		name: "name",
+		address: "address",
+		type: "type",
+		furniture: "furniture",
+		href: "href",
 	};
 
-	private validateKey(key: any, type?: "mfield" | "sfield"): boolean {
-		// 1. Must be a string
-		if (typeof key !== "string") return false;
+	constructor() {
+		this.datasets = new Map<string, InsightDataset>();
+		this.currentQueryId = "";
+	}
 
-		// 2. Must have exactly one underscore
+	private async initializeDatasets(): Promise<void> {
+		if (this.datasets.size > 0) {
+			return;
+		}
+		if (await fs.pathExists("./data")) {
+			const files = await fs.readdir("./data");
+			const jsonFiles = files.filter((file) => file.endsWith(".json"));
+			const readPromises = jsonFiles.map(async (fileName) => {
+				const data = await fs.readJson(`./data/${fileName}`);
+				const id = fileName.replace(".json", "");
+				// For C2, your addDataset should cache or infer the kind. Defaulting safely to sections for now:
+				return { id, numRows: data.length, kind: InsightDatasetKind.Sections };
+			});
+			try {
+				const results = await Promise.all(readPromises);
+				for (const res of results) {
+					this.datasets.set(res.id, { id: res.id, kind: res.kind, numRows: res.numRows });
+				}
+			} catch (_err) {
+				// Keep moving silently if a directory file is malformed
+			}
+		}
+	}
+
+	private validateKey(key: any, type?: "mfield" | "sfield"): boolean {
+		if (typeof key !== "string") return false;
 		const parts = key.split("_");
 		if (parts.length !== 2) return false;
 
 		const id = parts[0];
 		const field = parts[1];
 
-		// 3. ID Consistency: Use a helper property to track the ID of this query
-		// In performQuery, you should reset this.currentQueryId = "";
 		if (this.currentQueryId === "") {
 			this.currentQueryId = id;
 		} else if (this.currentQueryId !== id) {
-			return false; // Multiple datasets referenced!
+			return false;
 		}
 
-		// 4. Dataset Existence: Check if you actually have this data
 		if (!this.datasets.has(id)) return false;
-		// 5. Field Check: Match against the EBNF lists
-		const mfields = ["avg", "pass", "fail", "audit", "year"];
-		const sfields = ["dept", "id", "instructor", "title", "uuid"];
+		const kind = this.datasets.get(id)?.kind;
 
-		if (type === "mfield") return mfields.includes(field);
-		if (type === "sfield") return sfields.includes(field);
-
-		// If no specific type is required (like in COLUMNS), check both
-		return mfields.includes(field) || sfields.includes(field);
+		if (kind === InsightDatasetKind.Sections) {
+			if (type === "mfield") return this.sectionsMFields.includes(field);
+			if (type === "sfield") return this.sectionsSFields.includes(field);
+			return this.sectionsMFields.includes(field) || this.sectionsSFields.includes(field);
+		} else {
+			if (type === "mfield") return this.roomsMFields.includes(field);
+			if (type === "sfield") return this.roomsSFields.includes(field);
+			return this.roomsMFields.includes(field) || this.roomsSFields.includes(field);
+		}
 	}
 
 	private isLogicComparisonValid(filterList: any): boolean {
-		// 1. Logic comparisons MUST be arrays
-		if (!Array.isArray(filterList)) {
-			return false;
-		}
-
-		// 2. The FILTER_LIST must have at least one FILTER
-		if (filterList.length === 0) {
-			return false;
-		}
-
-		// 3. Every item in the array must itself be a valid FILTER
-		// This is where the RECURSION happens!
+		if (!Array.isArray(filterList) || filterList.length === 0) return false;
 		for (const filter of filterList) {
-			if (!this.isFilterValid(filter)) {
-				return false;
-			}
+			if (!this.isFilterValid(filter)) return false;
 		}
-
 		return true;
 	}
 
 	private isMComparisonValid(mcomp: any): boolean {
-		if (typeof mcomp !== "object" || mcomp === null) {
-			return false;
-		}
-
+		if (typeof mcomp !== "object" || mcomp === null || Array.isArray(mcomp)) return false;
 		const keys = Object.keys(mcomp);
-		if (keys.length !== 1) {
-			return false;
-		}
-
-		const mkey = keys[0]; // e.g., "sections_avg"
-		const val = mcomp[mkey];
-
-		// Check 1: Is the value a number?
-		if (typeof val !== "number") {
-			return false;
-		}
-
-		// Check 2: Is the key format valid (id_field)?
-		// Check 3: Is the field a valid mfield (avg, pass, etc.)?
-		return this.validateKey(mkey, "mfield");
+		if (keys.length !== 1) return false;
+		return typeof mcomp[keys[0]] === "number" && this.validateKey(keys[0], "mfield");
 	}
 
 	private isSComparisonValid(scomp: any): boolean {
-		if (typeof scomp !== "object" || scomp === null) return false;
+		if (typeof scomp !== "object" || scomp === null || Array.isArray(scomp)) return false;
 		const keys = Object.keys(scomp);
 		if (keys.length !== 1) return false;
-
-		const skey = keys[0];
-		const val = scomp[skey];
-
-		// IS requires a string value (and can include wildcards *)
+		const val = scomp[keys[0]];
 		if (typeof val !== "string") return false;
 
-		return this.validateKey(skey, "sfield");
+		// Wildcard rules check
+		if (val.includes("*")) {
+			const inner = val.substring(1, val.length - 1);
+			if (inner.includes("*") || (val.length === 2 && val === "**")) return true;
+		}
+		return this.validateKey(keys[0], "sfield");
 	}
 
 	private isNegationValid(notVal: any): boolean {
-		if (typeof notVal !== "object" || notVal === null || Array.isArray(notVal)) {
-			return false;
-		}
-
-		const keys = Object.keys(notVal);
-		if (keys.length !== 1) {
-			return false;
-		}
-
-		return this.isFilterValid(notVal);
-	}
-
-	private isSectionValid(section: any, filter: any): boolean {
-		const key = Object.keys(filter)[0];
-		const content = filter[key];
-
-		switch (key) {
-			case "AND":
-				// Every filter in the list must be true
-				return content.every((subFilter: any) => this.isSectionValid(section, subFilter));
-			case "OR":
-				// At least one filter in the list must be true
-				return content.some((subFilter: any) => this.isSectionValid(section, subFilter));
-			case "NOT":
-				// Invert the result of the sub-filter
-				return !this.isSectionValid(section, content);
-			case "GT":
-				return this.handleMComp(section, content, (a, b) => a > b);
-			case "LT":
-				return this.handleMComp(section, content, (a, b) => a < b);
-			case "EQ":
-				return this.handleMComp(section, content, (a, b) => a === b);
-			case "IS":
-				return this.handleSComp(section, content);
-			default:
-				// If WHERE is empty, the EBNF usually implies everything matches
-				return true;
-		}
-	}
-
-	private handleMComp(section: any, comparison: any, op: (a: number, b: number) => boolean): boolean {
-		const queryKey = Object.keys(comparison)[0]; // e.g., "sections_avg"
-		const targetValue = comparison[queryKey]; // e.g., 90
-		const field = queryKey.split("_")[1]; // e.g., "avg"
-
-		// Convert section "Year" to number if needed (some datasets use strings for years)
-		let sectionValue = section[this.fieldToKey[field]];
-		if (field === "year") {
-			sectionValue = section.Section === "overall" ? this.overallNumber : parseInt(sectionValue, 10);
-		}
-
-		return op(sectionValue, targetValue);
-	}
-
-	private handleSComp(section: any, comparison: any): boolean {
-		const queryKey = Object.keys(comparison)[0];
-		const field = queryKey.split("_")[1];
-		const inputString = comparison[queryKey];
-		const sectionValue = String(section[this.fieldToKey[field]]);
-
-		// Escape regex special characters except our asterisk
-		let regString = inputString.replace(/[.+^${}()|[\]\\]/g, "\\$&");
-		// Replace '*' with '.*' (the regex equivalent)
-		regString = "^" + regString.replace(/\*/g, ".*") + "$";
-
-		const regex = new RegExp(regString);
-		return regex.test(sectionValue);
-	}
-
-	private transformToResult(section: any, columns: string[]): InsightResult {
-		const result: InsightResult = {};
-
-		for (const columnKey of columns) {
-			// columnKey is like "sections_avg"
-			const field = columnKey.split("_")[1]; // "avg"
-			const dataKey = this.fieldToKey[field]; // "Avg"
-
-			let value = section[dataKey];
-
-			// Apply the "overall" year logic if necessary
-			if (field === "year") {
-				value = section.Section === "overall" ? this.overallNumber : parseInt(value, 10);
-			}
-
-			// Ensure UUIDs are strings and other types match InsightResult
-			if (field === "uuid") {
-				value = String(value);
-			}
-
-			result[columnKey] = value;
-		}
-
-		return result;
+		if (typeof notVal !== "object" || notVal === null || Array.isArray(notVal)) return false;
+		return Object.keys(notVal).length === 1 && this.isFilterValid(notVal);
 	}
 
 	private isQueryValid(query: any): boolean {
+		if (typeof query !== "object" || query === null || Array.isArray(query)) return false;
 		const keys = Object.keys(query);
-		if (keys.length !== 2 || !keys.includes("WHERE") || !keys.includes("OPTIONS")) {
-			return false;
-		}
-		if (Object.keys(query.WHERE).length > 0) {
-			if (!this.isFilterValid(query.WHERE)) {
-				return false;
-			}
-		}
-		if (!this.isOptionsValid(query.OPTIONS)) {
-			return false;
-		}
+		if (keys.length !== 2 || !keys.includes("WHERE") || !keys.includes("OPTIONS")) return false;
+		if (query.WHERE === undefined || query.OPTIONS === undefined) return false;
 
-		return true;
+		if (Object.keys(query.WHERE).length > 0 && !this.isFilterValid(query.WHERE)) return false;
+		return this.isOptionsValid(query.OPTIONS);
 	}
 
 	private isFilterValid(filter: any): boolean {
-		if (typeof filter !== "object" || filter === null || Array.isArray(filter)) {
-			return false;
-		}
+		if (typeof filter !== "object" || filter === null || Array.isArray(filter)) return false;
 		const keys = Object.keys(filter);
-
-		if (keys.length !== 1) {
-			return false;
-		}
+		if (keys.length !== 1) return false;
 
 		const key = keys[0];
-
-		if (key === "AND" || key === "OR") {
-			return this.isLogicComparisonValid(filter[key]);
-		} else if (key === "GT" || key === "LT" || key === "EQ") {
-			return this.isMComparisonValid(filter[key]);
-		} else if (key === "IS") {
-			return this.isSComparisonValid(filter[key]);
-		} else if (key === "NOT") {
-			return this.isNegationValid(filter[key]);
-		}
-
+		if (key === "AND" || key === "OR") return this.isLogicComparisonValid(filter[key]);
+		if (key === "GT" || key === "LT" || key === "EQ") return this.isMComparisonValid(filter[key]);
+		if (key === "IS") return this.isSComparisonValid(filter[key]);
+		if (key === "NOT") return this.isNegationValid(filter[key]);
 		return false;
 	}
 
 	private isOptionsValid(options: any): boolean {
-		// 1. Basic check: is it an object?
-		if (typeof options !== "object" || options === null || Array.isArray(options)) {
-			return false;
-		}
+		if (typeof options !== "object" || options === null || Array.isArray(options)) return false;
+		if (!Object.keys(options).includes("COLUMNS") || !Array.isArray(options.COLUMNS) || options.COLUMNS.length === 0) return false;
 
-		// 2. Validate COLUMNS (Mandatory)
-		if (!Object.keys(options).includes("COLUMNS") || !Array.isArray(options.COLUMNS) || options.COLUMNS.length === 0) {
-			return false;
-		}
-
-		// 3. Check every key in COLUMNS
 		for (const columnKey of options.COLUMNS) {
-			if (!this.validateKey(columnKey)) {
-				return false;
-			}
+			if (!this.validateKey(columnKey)) return false;
 		}
 
-		// 4. Validate ORDER (Optional)
 		if (Object.keys(options).includes("ORDER")) {
-			const orderKey = options.ORDER;
-			// ORDER must be a string and it MUST be one of the keys in COLUMNS
-			if (typeof orderKey !== "string" || !options.COLUMNS.includes(orderKey)) {
+			const order = options.ORDER;
+			if (typeof order === "string") {
+				if (!options.COLUMNS.includes(order)) return false;
+			} else if (typeof order === "object" && order !== null && !Array.isArray(order)) {
+				const orderKeys = Object.keys(order);
+				if (orderKeys.length !== 2 || !orderKeys.includes("dir") || !orderKeys.includes("keys")) return false;
+				if (order.dir !== "UP" && order.dir !== "DOWN") return false;
+				if (!Array.isArray(order.keys) || order.keys.length === 0) return false;
+				for (const k of order.keys) {
+					if (!this.validateKey(k) || !options.COLUMNS.includes(k)) return false;
+				}
+			} else {
 				return false;
 			}
 		}
 
-		// 5. Ensure no extra keys are in OPTIONS (like 'WHERE' inside 'OPTIONS')
 		const validOptionsKeys = ["COLUMNS", "ORDER"];
-		if (Object.keys(options).some((k) => !validOptionsKeys.includes(k))) {
-			return false;
-		}
-
-		return true;
+		return !Object.keys(options).some((k) => !validOptionsKeys.includes(k));
 	}
 
 	public async performQuery(query: unknown): Promise<InsightResult[]> {
-		// TODO: Remove this once you implement the methods!
 		this.currentQueryId = "";
 		await this.initializeDatasets();
-		if (typeof query !== "object" || query === null || Array.isArray(query)) {
-			return Promise.reject(new InsightError("Query must be a non-null object"));
-		}
 
 		if (!this.isQueryValid(query)) {
 			return Promise.reject(new InsightError("Invalid Query"));
 		}
-		// const data = await this.retrieveDataset(id);
 
 		const queryObj = query as any;
-
 		const data = await this.loadDatasetFromDisk(this.currentQueryId);
 
 		const filteredResults = data.filter((section) => {
-			if (Object.keys(queryObj.WHERE).length === 0) {
-				return true;
-			}
+			if (Object.keys(queryObj.WHERE).length === 0) return true;
 			return this.isSectionValid(section, queryObj.WHERE);
 		});
 
-		if (filteredResults.length > this.resultLimit) {
+		if (filteredResults.length > 5000) {
 			throw new ResultTooLargeError("Result too large (> 5000)");
 		}
 
@@ -463,126 +214,147 @@ export default class InsightFacade implements IInsightFacade {
 		});
 
 		if (queryObj.OPTIONS.ORDER) {
-			const orderKey = queryObj.OPTIONS.ORDER;
+			const order = queryObj.OPTIONS.ORDER;
+			const isObjectOrder = typeof order === "object";
+			const direction = isObjectOrder ? order.dir : "UP";
+			const sortKeys: string[] = isObjectOrder ? order.keys : [order];
+
 			results.sort((a, b) => {
-				if (a[orderKey] > b[orderKey]) return 1;
-				if (a[orderKey] < b[orderKey]) return -1;
+				for (const key of sortKeys) {
+					if (a[key] > b[key]) return direction === "UP" ? 1 : -1;
+					if (a[key] < b[key]) return direction === "UP" ? -1 : 1;
+				}
 				return 0;
 			});
 		}
-
 		return results;
 	}
 
-	private async loadDatasetFromDisk(id: string): Promise<any[]> {
-		try {
-			const path = `./data/${id}.json`;
-			// fs.readJson automatically parses the JSON string into a JS object/array
-			return await fs.readJson(path);
-		} catch (_err) {
-			// This handles cases where the file might be missing or corrupted
-			throw new InsightError(`Could not read dataset ${id} from disk`);
+	// Keep old sections helper operations identical
+	private isSectionValid(section: any, filter: any): boolean {
+		const key = Object.keys(filter)[0];
+		const content = filter[key];
+		switch (key) {
+			case "AND": return content.every((subFilter: any) => this.isSectionValid(section, subFilter));
+			case "OR": return content.some((subFilter: any) => this.isSectionValid(section, subFilter));
+			case "NOT": return !this.isSectionValid(section, content);
+			case "GT": return this.handleMComp(section, content, (a, b) => a > b);
+			case "LT": return this.handleMComp(section, content, (a, b) => a < b);
+			case "EQ": return this.handleMComp(section, content, (a, b) => a === b);
+			case "IS": return this.handleSComp(section, content);
+			default: return true;
 		}
 	}
 
+	private handleMComp(section: any, comparison: any, op: (a: number, b: number) => boolean): boolean {
+		const queryKey = Object.keys(comparison)[0];
+		const targetValue = comparison[queryKey];
+		const field = queryKey.split("_")[1];
+		let sectionValue = section[this.fieldToKey[field]];
+		if (field === "year") {
+			sectionValue = section.Section === "overall" ? 1900 : parseInt(sectionValue, 10);
+		}
+		return op(sectionValue, targetValue);
+	}
+
+	private handleSComp(section: any, comparison: any): boolean {
+		const queryKey = Object.keys(comparison)[0];
+		const field = queryKey.split("_")[1];
+		const inputString = comparison[queryKey];
+		const sectionValue = String(section[this.fieldToKey[field]]);
+		let regString = inputString.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+		regString = "^" + regString.replace(/\*/g, ".*") + "$";
+		return new RegExp(regString).test(sectionValue);
+	}
+
+	private transformToResult(section: any, columns: string[]): InsightResult {
+		const result: InsightResult = {};
+		for (const columnKey of columns) {
+			const field = columnKey.split("_")[1];
+			const dataKey = this.fieldToKey[field];
+			let value = section[dataKey];
+			if (field === "year") {
+				value = section.Section === "overall" ? 1900 : parseInt(value, 10);
+			}
+			if (field === "uuid") value = String(value);
+			result[columnKey] = value;
+		}
+		return result;
+	}
+
+	private async loadDatasetFromDisk(id: string): Promise<any[]> {
+		return await fs.readJson(`./data/${id}.json`);
+	}
+
+	public async addDataset(id: string, content: string, kind: InsightDatasetKind): Promise<string[]> {
+		await this.initializeDatasets();
+		if (id === "" || id.includes("_") || id.trim().length === 0) throw new InsightError("Invalid id");
+		if (this.datasets.has(id)) throw new InsightError("ID already exists");
+		if (!content) throw new InsightError("No content provided");
+
+		const zip = await JSZip.loadAsync(content, { base64: true });
+		let rows: any[];
+		if (kind === InsightDatasetKind.Sections) rows = await this.parseSections(zip);
+		else if (kind === InsightDatasetKind.Rooms) rows = await this.parseRooms(zip);
+		else throw new InsightError("Invalid dataset kind");
+
+		if (rows.length === 0) throw new InsightError("No valid rows found");
+		await fs.ensureDir("./data");
+		await fs.writeJson(`./data/${id}.json`, rows);
+		this.datasets.set(id, { id, kind, numRows: rows.length });
+		return Array.from(this.datasets.keys());
+	}
+
+	public async removeDataset(id: string): Promise<string> {
+		await this.initializeDatasets();
+		if (id === "" || id.includes("_") || id.trim().length === 0) throw new InsightError("Invalid id");
+		if (!this.datasets.has(id)) throw new NotFoundError("id not found");
+		this.datasets.delete(id);
+		await fs.remove(`./data/${id}.json`);
+		return id;
+	}
+
 	public async listDatasets(): Promise<InsightDataset[]> {
-		// TODO: Remove this once you implement the methods!
 		await this.initializeDatasets();
 		return Array.from(this.datasets.values());
 	}
 
 	private async parseSections(zip: JSZip): Promise<any[]> {
 		const courseFiles = Object.values(zip.files).filter((file) => file.name.startsWith("courses/") && !file.dir);
-
-		if (courseFiles.length === 0) {
-			throw new InsightError("Error: No course files found in dataset");
-		}
-
+		if (courseFiles.length === 0) throw new InsightError("No course files found");
 		const sections: any[] = [];
-
-		// parse each course file and extract sections
 		await Promise.all(
-			// parse each course
 			courseFiles.map(async (file) => {
-				let course: any;
 				try {
 					const text = await file.async("text");
-					course = JSON.parse(text);
-				} catch {
-					// skip corrupt files
-					return;
-				}
-
-				if (course === null || course === undefined) return;
-				const results = course.result;
-				if (!Array.isArray(results)) return;
-
-				// get sections of a course
-				for (const row of results) {
-					const section = parseSection(row);
-					if (section !== null) {
-						sections.push(section);
+					const course = JSON.parse(text);
+					if (course && Array.isArray(course.result)) {
+						for (const row of course.result) {
+							const parsed = parseSection(row);
+							if (parsed) sections.push(parsed);
+						}
 					}
+				} catch {
+					// Skip malformed text entries cleanly
 				}
 			})
 		);
-
 		return sections;
 	}
 
 	private async parseRooms(zip: JSZip): Promise<any[]> {
 		const rooms: any[] = [];
-
-		// get index.htm file
 		const indexFile = zip.file("index.htm");
-		if (!indexFile) {
-			throw new InsightError("Error: No index.htm file found in dataset");
-		}
-
-		// get buildings
-		const indexHtml = await indexFile.async("text");
-		const buildings = parseBuildings(indexHtml);
-
-		// no building files found
-		if (buildings.length === 0) return rooms;
-
-		await Promise.all(
-			buildings.map(async (building) => {
-				const filePath = building.link.replace("./", "");
-				const buildingFile = zip.file(filePath);
-				if (!buildingFile) return;
-
-				const buildingHtml = await buildingFile.async("text");
-			})
-		);
-
+		if (!indexFile) throw new InsightError("No index.htm file found");
 		return rooms;
 	}
 }
 
-// helper to parse (and validate fields of) a section
 function parseSection(row: any): any | null {
-	// special case when Section = overall
-	let year: number;
-	if (row.Section === "overall") {
-		year = 1900;
-	} else {
-		year = Number(row.Year);
-	}
-
 	const hasRequiredFields =
-		row.id !== undefined &&
-		row.Course !== undefined &&
-		row.Title !== undefined &&
-		row.Professor !== undefined &&
-		row.Subject !== undefined &&
-		row.Year !== undefined &&
-		row.Avg !== undefined &&
-		row.Pass !== undefined &&
-		row.Fail !== undefined &&
-		row.Audit !== undefined;
-
-	// missing one or more required fields
+		row.id !== undefined && row.Course !== undefined && row.Title !== undefined &&
+		row.Professor !== undefined && row.Subject !== undefined && row.Year !== undefined &&
+		row.Avg !== undefined && row.Pass !== undefined && row.Fail !== undefined && row.Audit !== undefined;
 	if (!hasRequiredFields) return null;
 
 	return {
@@ -591,19 +363,10 @@ function parseSection(row: any): any | null {
 		title: String(row.Title),
 		instructor: String(row.Professor),
 		dept: String(row.Subject),
-		year: year,
+		year: row.Section === "overall" ? 1900 : Number(row.Year),
 		avg: Number(row.Avg),
 		pass: Number(row.Pass),
 		fail: Number(row.Fail),
 		audit: Number(row.Audit),
 	};
-}
-
-// helper to parse building files
-function parseBuildings(html: string): any[] {
-	const buildings: any[] = [];
-
-	const document = parse5.parse(html);
-
-	return buildings;
 }
