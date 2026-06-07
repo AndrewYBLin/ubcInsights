@@ -292,10 +292,25 @@ describe("InsightFacade", function () {
                 facade = new InsightFacade_1.default();
                 const datasetList = await facade.listDatasets();
                 (0, chai_1.expect)(datasetList).to.have.lengthOf(1);
-                (0, chai_1.expect)(datasetList).to.deep.include.members([{ id: "validId", kind: IInsightFacade_1.InsightDatasetKind.Sections, numRows: 1 }]);
+                (0, chai_1.expect)(datasetList).to.deep.include.members([
+                    { id: "validId", kind: IInsightFacade_1.InsightDatasetKind.Sections, numRows: 1 },
+                ]);
             }
             catch (err) {
                 chai_1.expect.fail("Should not have thrown!");
+            }
+        });
+        it("should reject a room dataset missing index.htm file", async function () {
+            try {
+                const zip = new jszip_1.default();
+                zip.folder("campus");
+                const content = await zip.generateAsync({ type: "base64" });
+                await facade.addDataset("rooms", content, IInsightFacade_1.InsightDatasetKind.Rooms);
+                chai_1.expect.fail("Should have thrown!");
+            }
+            catch (err) {
+                (0, chai_1.expect)(err).to.be.an.instanceOf(IInsightFacade_1.InsightError);
+                (0, chai_1.expect)(err).to.have.property("message").that.includes("index.htm");
             }
         });
     });
@@ -598,7 +613,9 @@ describe("InsightFacade", function () {
                 chai_1.expect.fail("Should have thrown!");
             }
             catch (err) {
-                (0, chai_1.expect)(err).to.have.property("message").that.includes("Filter is not an object");
+                (0, chai_1.expect)(err)
+                    .to.have.property("message")
+                    .that.includes("Filter is not an object");
                 (0, chai_1.expect)(err).to.be.an.instanceOf(IInsightFacade_1.InsightError);
             }
         });
@@ -621,7 +638,9 @@ describe("InsightFacade", function () {
                 chai_1.expect.fail("Should have thrown!");
             }
             catch (err) {
-                (0, chai_1.expect)(err).to.have.property("message").that.includes("Filter must have exactly one key");
+                (0, chai_1.expect)(err)
+                    .to.have.property("message")
+                    .that.includes("Filter must have exactly one key");
                 (0, chai_1.expect)(err).to.be.an.instanceOf(IInsightFacade_1.InsightError);
             }
         });
@@ -638,7 +657,9 @@ describe("InsightFacade", function () {
                 chai_1.expect.fail("Should have thrown!");
             }
             catch (err) {
-                (0, chai_1.expect)(err).to.have.property("message").that.includes("non-empty array");
+                (0, chai_1.expect)(err)
+                    .to.have.property("message")
+                    .that.includes("non-empty array");
                 (0, chai_1.expect)(err).to.be.an.instanceOf(IInsightFacade_1.InsightError);
             }
         });
@@ -655,7 +676,9 @@ describe("InsightFacade", function () {
                 chai_1.expect.fail("Should have thrown!");
             }
             catch (err) {
-                (0, chai_1.expect)(err).to.have.property("message").that.includes("non-empty array");
+                (0, chai_1.expect)(err)
+                    .to.have.property("message")
+                    .that.includes("non-empty array");
                 (0, chai_1.expect)(err).to.be.an.instanceOf(IInsightFacade_1.InsightError);
             }
         });
@@ -675,7 +698,9 @@ describe("InsightFacade", function () {
                 chai_1.expect.fail("Should have thrown!");
             }
             catch (err) {
-                (0, chai_1.expect)(err).to.have.property("message").that.includes("Invalid filter type");
+                (0, chai_1.expect)(err)
+                    .to.have.property("message")
+                    .that.includes("Invalid filter type");
                 (0, chai_1.expect)(err).to.be.an.instanceOf(IInsightFacade_1.InsightError);
             }
         });
@@ -693,7 +718,9 @@ describe("InsightFacade", function () {
                 chai_1.expect.fail("Should have thrown!");
             }
             catch (err) {
-                (0, chai_1.expect)(err).to.have.property("message").that.includes("Comparison content");
+                (0, chai_1.expect)(err)
+                    .to.have.property("message")
+                    .that.includes("Comparison content");
                 (0, chai_1.expect)(err).to.be.an.instanceOf(IInsightFacade_1.InsightError);
             }
         });
@@ -714,7 +741,9 @@ describe("InsightFacade", function () {
                 chai_1.expect.fail("Should have thrown!");
             }
             catch (err) {
-                (0, chai_1.expect)(err).to.have.property("message").that.includes("Comparison must have exactly one key");
+                (0, chai_1.expect)(err)
+                    .to.have.property("message")
+                    .that.includes("Comparison must have exactly one key");
                 (0, chai_1.expect)(err).to.be.an.instanceOf(IInsightFacade_1.InsightError);
             }
         });
@@ -734,7 +763,9 @@ describe("InsightFacade", function () {
                 chai_1.expect.fail("Should have thrown!");
             }
             catch (err) {
-                (0, chai_1.expect)(err).to.have.property("message").that.includes("MComparison value must be a number");
+                (0, chai_1.expect)(err)
+                    .to.have.property("message")
+                    .that.includes("MComparison value must be a number");
                 (0, chai_1.expect)(err).to.be.an.instanceOf(IInsightFacade_1.InsightError);
             }
         });
@@ -754,7 +785,9 @@ describe("InsightFacade", function () {
                 chai_1.expect.fail("Should have thrown!");
             }
             catch (err) {
-                (0, chai_1.expect)(err).to.have.property("message").that.includes("Invalid Comparison key format");
+                (0, chai_1.expect)(err)
+                    .to.have.property("message")
+                    .that.includes("Invalid Comparison key format");
                 (0, chai_1.expect)(err).to.be.an.instanceOf(IInsightFacade_1.InsightError);
             }
         });
@@ -774,7 +807,9 @@ describe("InsightFacade", function () {
                 chai_1.expect.fail("Should have thrown!");
             }
             catch (err) {
-                (0, chai_1.expect)(err).to.have.property("message").that.includes("Invalid Comparison key field");
+                (0, chai_1.expect)(err)
+                    .to.have.property("message")
+                    .that.includes("Invalid Comparison key field");
                 (0, chai_1.expect)(err).to.be.an.instanceOf(IInsightFacade_1.InsightError);
             }
         });
@@ -812,7 +847,9 @@ describe("InsightFacade", function () {
                 chai_1.expect.fail("Should have thrown!");
             }
             catch (err) {
-                (0, chai_1.expect)(err).to.have.property("message").that.includes("Unexpected OPTIONS key found");
+                (0, chai_1.expect)(err)
+                    .to.have.property("message")
+                    .that.includes("Unexpected OPTIONS key found");
                 (0, chai_1.expect)(err).to.be.an.instanceOf(IInsightFacade_1.InsightError);
             }
         });
@@ -832,7 +869,9 @@ describe("InsightFacade", function () {
                 chai_1.expect.fail("Should have thrown!");
             }
             catch (err) {
-                (0, chai_1.expect)(err).to.have.property("message").that.includes("multiple datasets");
+                (0, chai_1.expect)(err)
+                    .to.have.property("message")
+                    .that.includes("multiple datasets");
                 (0, chai_1.expect)(err).to.be.an.instanceOf(IInsightFacade_1.InsightError);
             }
         });
@@ -878,7 +917,10 @@ describe("InsightFacade", function () {
                     COLUMNS: ["ubc_dept"],
                 },
             });
-            (0, chai_1.expect)(result).to.deep.equal([{ ubc_dept: "CPSC" }, { ubc_dept: "CPSC" }]);
+            (0, chai_1.expect)(result).to.deep.equal([
+                { ubc_dept: "CPSC" },
+                { ubc_dept: "CPSC" },
+            ]);
         });
         it("should filter sections with wildcard at end", async function () {
             const zip = new jszip_1.default();
@@ -922,7 +964,10 @@ describe("InsightFacade", function () {
                     COLUMNS: ["ubc_dept"],
                 },
             });
-            (0, chai_1.expect)(result).to.deep.equal([{ ubc_dept: "CPSC" }, { ubc_dept: "COGS" }]);
+            (0, chai_1.expect)(result).to.deep.equal([
+                { ubc_dept: "CPSC" },
+                { ubc_dept: "COGS" },
+            ]);
         });
         it("should pass with valid query", async function () {
             try {

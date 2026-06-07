@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -8,6 +41,7 @@ const fs_extra_1 = __importDefault(require("fs-extra"));
 const IInsightFacade_1 = require("./IInsightFacade");
 const DATA_DIR = "./data";
 const path_1 = __importDefault(require("path"));
+const parse5 = __importStar(require("parse5"));
 class InsightFacade {
     datasets = new Map();
     validMFields = ["avg", "pass", "fail", "audit", "year"];
@@ -46,6 +80,29 @@ class InsightFacade {
             throw new IInsightFacade_1.InsightError("Error: No content provided");
         }
         const zip = await jszip_1.default.loadAsync(content, { base64: true });
+        let rows;
+        if (kind === IInsightFacade_1.InsightDatasetKind.Sections) {
+            rows = await this.parseSection(zip);
+        }
+        else if (kind === IInsightFacade_1.InsightDatasetKind.Rooms) {
+            rows = await this.parseRooms(zip);
+        }
+        else {
+            throw new IInsightFacade_1.InsightError("Error: Invalid dataset kind");
+        }
+        if (rows.length === 0) {
+            throw new IInsightFacade_1.InsightError("Error: No valid rows found in dataset");
+        }
+        const datasetIds = {
+            metadata: { id, kind, numRows: rows.length },
+            rows,
+        };
+        await fs_extra_1.default.ensureDir(DATA_DIR);
+        await fs_extra_1.default.writeJSON(path_1.default.join(DATA_DIR, `${id}.json`), datasetIds);
+        this.datasets.set(id, datasetIds);
+        return Array.from(this.datasets.keys());
+    }
+    async parseSection(zip) {
         const courseFiles = Object.values(zip.files).filter((file) => file.name.startsWith("courses/") && !file.dir);
         if (courseFiles.length === 0) {
             throw new IInsightFacade_1.InsightError("Error: No course files found in dataset");
@@ -72,17 +129,29 @@ class InsightFacade {
                 }
             }
         }));
-        if (sections.length === 0) {
-            throw new IInsightFacade_1.InsightError("Error: No valid sections found in dataset");
+        return sections;
+    }
+    async parseRooms(zip) {
+        const indexFile = zip.file("index.htm");
+        if (!indexFile) {
+            throw new IInsightFacade_1.InsightError("Error: No index.htm file found in dataset");
         }
-        const datasetIds = {
-            metadata: { id, kind, numRows: sections.length },
-            sections,
-        };
-        await fs_extra_1.default.ensureDir(DATA_DIR);
-        await fs_extra_1.default.writeJSON(path_1.default.join(DATA_DIR, `${id}.json`), datasetIds);
-        this.datasets.set(id, datasetIds);
-        return Array.from(this.datasets.keys());
+        const indexHtml = await indexFile.async("text");
+        const buildings = parseBuildings(indexHtml);
+        const rooms = [];
+        await Promise.all(buildings.map(async (building) => {
+            const geo = await getGeoLocation(building.address);
+            if (!geo || geo.error)
+                return;
+            const filePath = building.href.replace("./", "");
+            const buildingFile = zip.file(filePath);
+            if (!buildingFile)
+                return;
+            const buildingHtml = await buildingFile.async("text");
+            const buildingRooms = parseRoomTable(buildingHtml, building, geo);
+            rooms.push(...buildingRooms);
+        }));
+        return rooms;
     }
     async removeDataset(id) {
         await this.initialize();
@@ -103,7 +172,7 @@ class InsightFacade {
             throw new IInsightFacade_1.InsightError("Error: Dataset not found");
         }
         const dataset = this.datasets.get(datasetID);
-        const sections = dataset.sections;
+        const sections = dataset.rows;
         const queryObj = query;
         const where = queryObj.WHERE;
         const options = queryObj.OPTIONS;
@@ -167,7 +236,9 @@ class InsightFacade {
         this.validateFilter(whereObj);
     }
     validateFilter(filter) {
-        if (typeof filter !== "object" || filter === null || Array.isArray(filter)) {
+        if (typeof filter !== "object" ||
+            filter === null ||
+            Array.isArray(filter)) {
             throw new IInsightFacade_1.InsightError("Error: Filter is not an object");
         }
         const filterObj = filter;
@@ -203,7 +274,9 @@ class InsightFacade {
         }
     }
     validateComparison(content, type) {
-        if (typeof content !== "object" || content === null || Array.isArray(content)) {
+        if (typeof content !== "object" ||
+            content === null ||
+            Array.isArray(content)) {
             throw new IInsightFacade_1.InsightError("Error: Comparison content is not an object");
         }
         const contentObj = content;
@@ -258,7 +331,9 @@ class InsightFacade {
         }
     }
     validateOptions(options) {
-        if (typeof options !== "object" || options === null || Array.isArray(options)) {
+        if (typeof options !== "object" ||
+            options === null ||
+            Array.isArray(options)) {
             throw new IInsightFacade_1.InsightError("Error: OPTIONS is not an object");
         }
         const optionsObj = options;
@@ -389,5 +464,116 @@ function parseSection(row) {
         fail: Number(row.Fail),
         audit: Number(row.Audit),
     };
+}
+function parseBuildings(html) {
+    const buildings = [];
+    const document = parse5.parse(html);
+    const table = findBuildingTable(document);
+    if (!table)
+        return buildings;
+    const tableRows = findNode(table, "tbody");
+    if (!tableRows)
+        return buildings;
+    const rows = tableRows.childNodes.filter((node) => node.tagName === "tr");
+    for (const row of rows) {
+        const building = getBuildingInfo(row);
+        if (building) {
+            buildings.push(building);
+        }
+    }
+    return buildings;
+}
+function findBuildingTable(node) {
+    if (node.nodeName === "table") {
+        if (tableHasClass(node, "views-field-title")) {
+            return node;
+        }
+    }
+    if (node.childNodes) {
+        for (const child of node.childNodes) {
+            const result = findBuildingTable(child);
+            if (result)
+                return result;
+        }
+    }
+    return null;
+}
+function tableHasClass(table, className) {
+    const tds = findAllNodes(table, "td");
+    return tds.some((td) => hasClass(td, className));
+}
+function findAllNodes(node, name) {
+    const results = [];
+    if (node.tagName === name) {
+        results.push(node);
+    }
+    if (node.childNodes) {
+        for (const child of node.childNodes) {
+            results.push(...findAllNodes(child, name));
+        }
+    }
+    return results;
+}
+function hasClass(node, className) {
+    const classAttr = getAttribute(node, "class");
+    if (!classAttr)
+        return false;
+    return classAttr.split(" ").includes(className);
+}
+function getAttribute(node, attrName) {
+    if (!node.attrs)
+        return null;
+    const attr = node.attrs.find((a) => a.name === attrName);
+    return attr ? attr.value : null;
+}
+function findNode(node, name) {
+    if (node.tagName === name)
+        return node;
+    if (node.childNodes) {
+        for (const child of node.childNodes) {
+            const result = findNode(child, name);
+            if (result)
+                return result;
+        }
+    }
+    return null;
+}
+function getBuildingInfo(row) {
+    const cells = row.childNodes.filter((node) => node.tagName === "td");
+    let link = null;
+    let shortname = null;
+    let fullname = null;
+    let address = null;
+    for (const cell of cells) {
+        if (hasClass(cell, "views-field-title")) {
+            const anchor = findNode(cell, "a");
+            if (anchor) {
+                link = getAttribute(anchor, "href");
+                fullname = getTextContent(anchor).trim();
+            }
+        }
+        if (hasClass(cell, "views-field-field-building-code")) {
+            shortname = getTextContent(cell).trim();
+        }
+        if (hasClass(cell, "views-field-field-building-address")) {
+            address = getTextContent(cell).trim();
+        }
+    }
+    if (!link || !shortname || !fullname || !address)
+        return null;
+    return { link, shortname, fullname, address };
+}
+function getTextContent(node) {
+    return "";
+}
+async function getGeoLocation(address) {
+    const encoded = encodeURIComponent(address);
+    const url = `http://cs310.students.cs.ubc.ca:11316/api/v1/project_team059/${encoded}`;
+    const response = fetch(url);
+    return (await response).json();
+}
+function parseRoomTable(html, building, geo) {
+    const rooms = [];
+    return rooms;
 }
 //# sourceMappingURL=InsightFacade.js.map

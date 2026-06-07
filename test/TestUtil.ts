@@ -16,15 +16,15 @@ const persistDir = "./data";
  * @return Promise A base 64 representation of the file
  */
 export async function getContentFromArchives(name: string): Promise<string> {
-	const buffer = await fs.readFile("test/resources/archives/" + name);
-	return buffer.toString("base64");
+  const buffer = await fs.readFile("test/resources/archives/" + name);
+  return buffer.toString("base64");
 }
 
 /**
  * Removes all files within the persistDir.
  */
 export async function clearDisk(): Promise<void> {
-	await fs.remove(persistDir);
+  await fs.remove(persistDir);
 }
 
 /**
@@ -34,11 +34,11 @@ export async function clearDisk(): Promise<void> {
  * @throws Error if JSON file is not a valid test query.
  */
 export async function loadTestQuery(testname: string): Promise<ITestQuery> {
-	const filename = extractFileFromTestName(testname);
-	const data = await fs.readFile(`test/resources/queries/${filename}`, "utf-8");
-	const testQuery: unknown = JSON.parse(data);
-	assertTestQuery(testQuery);
-	return testQuery;
+  const filename = extractFileFromTestName(testname);
+  const data = await fs.readFile(`test/resources/queries/${filename}`, "utf-8");
+  const testQuery: unknown = JSON.parse(data);
+  assertTestQuery(testQuery);
+  return testQuery;
 }
 
 /**
@@ -48,16 +48,16 @@ export async function loadTestQuery(testname: string): Promise<ITestQuery> {
  * @throws Error when no bracket pair is found.
  */
 export function extractFileFromTestName(name: string): string {
-	const match = name.match(/\[(.+)]/);
-	const validMatchLength = 2;
-	if (!match || match.length < validMatchLength) {
-		throw new Error(
-			"Invalid test name." +
-				"Test names must include a relative file path enclosed in brackets; e.g., [my/file.json]." +
-				`'${name}' does not include a file path in brackets.`
-		);
-	}
-	return match[1];
+  const match = name.match(/\[(.+)]/);
+  const validMatchLength = 2;
+  if (!match || match.length < validMatchLength) {
+    throw new Error(
+      "Invalid test name." +
+        "Test names must include a relative file path enclosed in brackets; e.g., [my/file.json]." +
+        `'${name}' does not include a file path in brackets.`,
+    );
+  }
+  return match[1];
 }
 
 /**
@@ -68,16 +68,24 @@ export function extractFileFromTestName(name: string): string {
  * @throws Error when a property is missing.
  */
 function assertTestQuery(testQuery: any): asserts testQuery is ITestQuery {
-	if (Array.isArray(testQuery)) {
-		throw new Error("ValidationError: Test Query must be an object not an array.");
-	}
-	if (!Object.hasOwn(testQuery, "input")) {
-		throw new Error("ValidationError: Test Query is missing required field 'input'.");
-	}
-	if (!Object.hasOwn(testQuery, "expected")) {
-		throw new Error("ValidationError: Test Query is missing required field 'expected'.");
-	}
-	if (!Object.hasOwn(testQuery, "errorExpected")) {
-		throw new Error("ValidationError: Test Query is missing required field 'errorExpected'.");
-	}
+  if (Array.isArray(testQuery)) {
+    throw new Error(
+      "ValidationError: Test Query must be an object not an array.",
+    );
+  }
+  if (!Object.hasOwn(testQuery, "input")) {
+    throw new Error(
+      "ValidationError: Test Query is missing required field 'input'.",
+    );
+  }
+  if (!Object.hasOwn(testQuery, "expected")) {
+    throw new Error(
+      "ValidationError: Test Query is missing required field 'expected'.",
+    );
+  }
+  if (!Object.hasOwn(testQuery, "errorExpected")) {
+    throw new Error(
+      "ValidationError: Test Query is missing required field 'errorExpected'.",
+    );
+  }
 }
