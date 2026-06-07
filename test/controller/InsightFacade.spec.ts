@@ -446,7 +446,7 @@ describe("InsightFacade", function () {
           </body></html>
         `;
         zip.file("index.htm", indexHtml);
-        
+
         const content = await zip.generateAsync({ type: "base64" });
         await facade.addDataset("rooms", content, InsightDatasetKind.Rooms);
         expect.fail("Should have thrown!");
