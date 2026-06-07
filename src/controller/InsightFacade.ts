@@ -9,6 +9,8 @@ import {
 } from "./IInsightFacade";
 import JSZip from "jszip";
 import * as fs from "fs-extra";
+import * as parse5 from "parse5";
+
 /**
  * This is the main programmatic entry point for the project.
  * Method documentation is in IInsightFacade
@@ -600,6 +602,8 @@ function parseSection(row: any): any | null {
 // helper to parse building files
 function parseBuildings(html: string): any[] {
 	const buildings: any[] = [];
+
+	const document = parse5.parse(html);
 
 	return buildings;
 }
