@@ -36,53 +36,61 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-const jszip_1 = __importDefault(require("jszip"));
-const fs_extra_1 = __importDefault(require("fs-extra"));
 const IInsightFacade_1 = require("./IInsightFacade");
-const DATA_DIR = "./data";
-const path_1 = __importDefault(require("path"));
+const jszip_1 = __importDefault(require("jszip"));
+const fs = __importStar(require("fs-extra"));
 const parse5 = __importStar(require("parse5"));
 class InsightFacade {
-    datasets = new Map();
-    validMFields = ["avg", "pass", "fail", "audit", "year"];
-    validSFields = ["dept", "id", "instructor", "title", "uuid"];
-    initialized = false;
-    async initialize() {
-        if (this.initialized)
-            return;
-        this.initialized = true;
-        await this.loadFromDisk();
+    datasets;
+    currentQueryId;
+    constructor() {
+        this.datasets = new Map();
+        this.currentQueryId = "";
     }
-    async loadFromDisk() {
-        if (!(await fs_extra_1.default.pathExists(DATA_DIR)))
+    async initializeDatasets() {
+        if (this.datasets.size > 0) {
             return;
-        const files = await fs_extra_1.default.readdir(DATA_DIR);
-        for (const file of files) {
-            if (!file.endsWith(".json"))
-                continue;
+        }
+        if (await fs.pathExists("./data")) {
+            const files = await fs.readdir("./data");
+            const jsonFiles = files.filter((file) => file.endsWith(".json"));
+            const readPromises = jsonFiles.map(async (fileName) => {
+                return fs.readJson(`./data/${fileName}`).then((data) => {
+                    return {
+                        id: fileName.replace(".json", ""),
+                        numRows: data.length,
+                    };
+                });
+            });
             try {
-                const stored = await fs_extra_1.default.readJSON(path_1.default.join(DATA_DIR, file));
-                this.datasets.set(stored.metadata.id, stored);
+                const results = await Promise.all(readPromises);
+                for (const res of results) {
+                    this.datasets.set(res.id, {
+                        id: res.id,
+                        kind: IInsightFacade_1.InsightDatasetKind.Sections,
+                        numRows: res.numRows,
+                    });
+                }
             }
-            catch {
+            catch (_err) {
             }
         }
     }
     async addDataset(id, content, kind) {
-        await this.initialize();
-        if (id.trim().length === 0 || id.includes("_")) {
-            throw new IInsightFacade_1.InsightError("Error: Invalid dataset id");
+        await this.initializeDatasets();
+        if (id === "" || id.includes("_") || id.trim().length === 0) {
+            return Promise.reject(new IInsightFacade_1.InsightError("Invalid id"));
         }
         if (this.datasets.has(id)) {
-            throw new IInsightFacade_1.InsightError("Error: Dataset with this id already exists");
+            return Promise.reject(new IInsightFacade_1.InsightError("ID already exists"));
         }
         if (content === null || content === undefined) {
-            throw new IInsightFacade_1.InsightError("Error: No content provided");
+            throw new IInsightFacade_1.InsightError("No content provided");
         }
         const zip = await jszip_1.default.loadAsync(content, { base64: true });
         let rows;
         if (kind === IInsightFacade_1.InsightDatasetKind.Sections) {
-            rows = await this.parseSection(zip);
+            rows = await this.parseSections(zip);
         }
         else if (kind === IInsightFacade_1.InsightDatasetKind.Rooms) {
             rows = await this.parseRooms(zip);
@@ -93,16 +101,302 @@ class InsightFacade {
         if (rows.length === 0) {
             throw new IInsightFacade_1.InsightError("Error: No valid rows found in dataset");
         }
-        const datasetIds = {
-            metadata: { id, kind, numRows: rows.length },
-            rows,
-        };
-        await fs_extra_1.default.ensureDir(DATA_DIR);
-        await fs_extra_1.default.writeJSON(path_1.default.join(DATA_DIR, `${id}.json`), datasetIds);
-        this.datasets.set(id, datasetIds);
+        await fs.ensureDir("./data");
+        await fs.writeJson(`./data/${id}.json`, rows);
+        this.datasets.set(id, { id: id, kind: kind, numRows: rows.length });
         return Array.from(this.datasets.keys());
     }
-    async parseSection(zip) {
+    async removeDataset(id) {
+        await this.initializeDatasets();
+        if (id === "" || id.includes("_") || id.trim().length === 0) {
+            return Promise.reject(new IInsightFacade_1.InsightError("Invalid id"));
+        }
+        if (!this.datasets.has(id)) {
+            return Promise.reject(new IInsightFacade_1.NotFoundError("id not found"));
+        }
+        this.datasets.delete(id);
+        try {
+            await fs.remove(`./data/${id}.json`);
+        }
+        catch (_err) {
+            return Promise.reject(new IInsightFacade_1.InsightError("Failed to delete data"));
+        }
+        return Promise.resolve(id);
+    }
+    overallNumber = 1900;
+    resultLimit = 5000;
+    fieldToKey = {
+        avg: "Avg",
+        pass: "Pass",
+        fail: "Fail",
+        audit: "Audit",
+        year: "Year",
+        dept: "Subject",
+        id: "Course",
+        instructor: "Professor",
+        title: "Title",
+        uuid: "id",
+    };
+    validateKey(key, type) {
+        if (typeof key !== "string")
+            return false;
+        const parts = key.split("_");
+        if (parts.length !== 2)
+            return false;
+        const id = parts[0];
+        const field = parts[1];
+        if (this.currentQueryId === "") {
+            this.currentQueryId = id;
+        }
+        else if (this.currentQueryId !== id) {
+            return false;
+        }
+        if (!this.datasets.has(id))
+            return false;
+        const mfields = ["avg", "pass", "fail", "audit", "year"];
+        const sfields = ["dept", "id", "instructor", "title", "uuid"];
+        if (type === "mfield")
+            return mfields.includes(field);
+        if (type === "sfield")
+            return sfields.includes(field);
+        return mfields.includes(field) || sfields.includes(field);
+    }
+    isLogicComparisonValid(filterList) {
+        if (!Array.isArray(filterList)) {
+            return false;
+        }
+        if (filterList.length === 0) {
+            return false;
+        }
+        for (const filter of filterList) {
+            if (!this.isFilterValid(filter)) {
+                return false;
+            }
+        }
+        return true;
+    }
+    isMComparisonValid(mcomp) {
+        if (typeof mcomp !== "object" || mcomp === null) {
+            return false;
+        }
+        const keys = Object.keys(mcomp);
+        if (keys.length !== 1) {
+            return false;
+        }
+        const mkey = keys[0];
+        const val = mcomp[mkey];
+        if (typeof val !== "number") {
+            return false;
+        }
+        return this.validateKey(mkey, "mfield");
+    }
+    isSComparisonValid(scomp) {
+        if (typeof scomp !== "object" || scomp === null)
+            return false;
+        const keys = Object.keys(scomp);
+        if (keys.length !== 1)
+            return false;
+        const skey = keys[0];
+        const val = scomp[skey];
+        if (typeof val !== "string")
+            return false;
+        return this.validateKey(skey, "sfield");
+    }
+    isNegationValid(notVal) {
+        if (typeof notVal !== "object" ||
+            notVal === null ||
+            Array.isArray(notVal)) {
+            return false;
+        }
+        const keys = Object.keys(notVal);
+        if (keys.length !== 1) {
+            return false;
+        }
+        return this.isFilterValid(notVal);
+    }
+    isSectionValid(section, filter) {
+        const key = Object.keys(filter)[0];
+        const content = filter[key];
+        switch (key) {
+            case "AND":
+                return content.every((subFilter) => this.isSectionValid(section, subFilter));
+            case "OR":
+                return content.some((subFilter) => this.isSectionValid(section, subFilter));
+            case "NOT":
+                return !this.isSectionValid(section, content);
+            case "GT":
+                return this.handleMComp(section, content, (a, b) => a > b);
+            case "LT":
+                return this.handleMComp(section, content, (a, b) => a < b);
+            case "EQ":
+                return this.handleMComp(section, content, (a, b) => a === b);
+            case "IS":
+                return this.handleSComp(section, content);
+            default:
+                return true;
+        }
+    }
+    handleMComp(section, comparison, op) {
+        const queryKey = Object.keys(comparison)[0];
+        const targetValue = comparison[queryKey];
+        const field = queryKey.split("_")[1];
+        let sectionValue = section[this.fieldToKey[field]];
+        if (field === "year") {
+            sectionValue =
+                section.Section === "overall"
+                    ? this.overallNumber
+                    : parseInt(sectionValue, 10);
+        }
+        return op(sectionValue, targetValue);
+    }
+    handleSComp(section, comparison) {
+        const queryKey = Object.keys(comparison)[0];
+        const field = queryKey.split("_")[1];
+        const inputString = comparison[queryKey];
+        const sectionValue = String(section[this.fieldToKey[field]]);
+        let regString = inputString.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+        regString = "^" + regString.replace(/\*/g, ".*") + "$";
+        const regex = new RegExp(regString);
+        return regex.test(sectionValue);
+    }
+    transformToResult(section, columns) {
+        const result = {};
+        for (const columnKey of columns) {
+            const field = columnKey.split("_")[1];
+            const dataKey = this.fieldToKey[field];
+            let value = section[dataKey];
+            if (field === "year") {
+                value =
+                    section.Section === "overall"
+                        ? this.overallNumber
+                        : parseInt(value, 10);
+            }
+            if (field === "uuid") {
+                value = String(value);
+            }
+            result[columnKey] = value;
+        }
+        return result;
+    }
+    isQueryValid(query) {
+        const keys = Object.keys(query);
+        if (keys.length !== 2 ||
+            !keys.includes("WHERE") ||
+            !keys.includes("OPTIONS")) {
+            return false;
+        }
+        if (Object.keys(query.WHERE).length > 0) {
+            if (!this.isFilterValid(query.WHERE)) {
+                return false;
+            }
+        }
+        if (!this.isOptionsValid(query.OPTIONS)) {
+            return false;
+        }
+        return true;
+    }
+    isFilterValid(filter) {
+        if (typeof filter !== "object" ||
+            filter === null ||
+            Array.isArray(filter)) {
+            return false;
+        }
+        const keys = Object.keys(filter);
+        if (keys.length !== 1) {
+            return false;
+        }
+        const key = keys[0];
+        if (key === "AND" || key === "OR") {
+            return this.isLogicComparisonValid(filter[key]);
+        }
+        else if (key === "GT" || key === "LT" || key === "EQ") {
+            return this.isMComparisonValid(filter[key]);
+        }
+        else if (key === "IS") {
+            return this.isSComparisonValid(filter[key]);
+        }
+        else if (key === "NOT") {
+            return this.isNegationValid(filter[key]);
+        }
+        return false;
+    }
+    isOptionsValid(options) {
+        if (typeof options !== "object" ||
+            options === null ||
+            Array.isArray(options)) {
+            return false;
+        }
+        if (!Object.keys(options).includes("COLUMNS") ||
+            !Array.isArray(options.COLUMNS) ||
+            options.COLUMNS.length === 0) {
+            return false;
+        }
+        for (const columnKey of options.COLUMNS) {
+            if (!this.validateKey(columnKey)) {
+                return false;
+            }
+        }
+        if (Object.keys(options).includes("ORDER")) {
+            const orderKey = options.ORDER;
+            if (typeof orderKey !== "string" || !options.COLUMNS.includes(orderKey)) {
+                return false;
+            }
+        }
+        const validOptionsKeys = ["COLUMNS", "ORDER"];
+        if (Object.keys(options).some((k) => !validOptionsKeys.includes(k))) {
+            return false;
+        }
+        return true;
+    }
+    async performQuery(query) {
+        this.currentQueryId = "";
+        await this.initializeDatasets();
+        if (typeof query !== "object" || query === null || Array.isArray(query)) {
+            return Promise.reject(new IInsightFacade_1.InsightError("Query must be a non-null object"));
+        }
+        if (!this.isQueryValid(query)) {
+            return Promise.reject(new IInsightFacade_1.InsightError("Invalid Query"));
+        }
+        const queryObj = query;
+        const data = await this.loadDatasetFromDisk(this.currentQueryId);
+        const filteredResults = data.filter((section) => {
+            if (Object.keys(queryObj.WHERE).length === 0) {
+                return true;
+            }
+            return this.isSectionValid(section, queryObj.WHERE);
+        });
+        if (filteredResults.length > this.resultLimit) {
+            throw new IInsightFacade_1.ResultTooLargeError("Result too large (> 5000)");
+        }
+        const results = filteredResults.map((section) => {
+            return this.transformToResult(section, queryObj.OPTIONS.COLUMNS);
+        });
+        if (queryObj.OPTIONS.ORDER) {
+            const orderKey = queryObj.OPTIONS.ORDER;
+            results.sort((a, b) => {
+                if (a[orderKey] > b[orderKey])
+                    return 1;
+                if (a[orderKey] < b[orderKey])
+                    return -1;
+                return 0;
+            });
+        }
+        return results;
+    }
+    async loadDatasetFromDisk(id) {
+        try {
+            const path = `./data/${id}.json`;
+            return await fs.readJson(path);
+        }
+        catch (_err) {
+            throw new IInsightFacade_1.InsightError(`Could not read dataset ${id} from disk`);
+        }
+    }
+    async listDatasets() {
+        await this.initializeDatasets();
+        return Array.from(this.datasets.values());
+    }
+    async parseSections(zip) {
         const courseFiles = Object.values(zip.files).filter((file) => file.name.startsWith("courses/") && !file.dir);
         if (courseFiles.length === 0) {
             throw new IInsightFacade_1.InsightError("Error: No course files found in dataset");
@@ -132,303 +426,23 @@ class InsightFacade {
         return sections;
     }
     async parseRooms(zip) {
+        const rooms = [];
         const indexFile = zip.file("index.htm");
         if (!indexFile) {
             throw new IInsightFacade_1.InsightError("Error: No index.htm file found in dataset");
         }
         const indexHtml = await indexFile.async("text");
         const buildings = parseBuildings(indexHtml);
-        const rooms = [];
+        if (buildings.length === 0)
+            return rooms;
         await Promise.all(buildings.map(async (building) => {
-            const geo = await getGeoLocation(building.address);
-            if (!geo || geo.error)
-                return;
-            const filePath = building.href.replace("./", "");
+            const filePath = building.link.replace("./", "");
             const buildingFile = zip.file(filePath);
             if (!buildingFile)
                 return;
             const buildingHtml = await buildingFile.async("text");
-            const buildingRooms = parseRoomTable(buildingHtml, building, geo);
-            rooms.push(...buildingRooms);
         }));
         return rooms;
-    }
-    async removeDataset(id) {
-        await this.initialize();
-        if (id.trim().length === 0 || id.includes("_")) {
-            throw new IInsightFacade_1.InsightError("Error: Invalid dataset id");
-        }
-        if (!this.datasets.has(id)) {
-            throw new IInsightFacade_1.NotFoundError("Error: Dataset id not found");
-        }
-        this.datasets.delete(id);
-        await fs_extra_1.default.remove(path_1.default.join(DATA_DIR, `${id}.json`));
-        return id;
-    }
-    async performQuery(query) {
-        await this.initialize();
-        const datasetID = this.validateQuery(query);
-        if (!this.datasets.has(datasetID)) {
-            throw new IInsightFacade_1.InsightError("Error: Dataset not found");
-        }
-        const dataset = this.datasets.get(datasetID);
-        const sections = dataset.rows;
-        const queryObj = query;
-        const where = queryObj.WHERE;
-        const options = queryObj.OPTIONS;
-        const columns = options.COLUMNS;
-        const order = options.ORDER;
-        let filtered;
-        if (Object.keys(where).length === 0) {
-            filtered = sections;
-        }
-        else {
-            filtered = sections.filter((section) => this.applyFilter(section, where));
-        }
-        const results = filtered.map((section) => this.applyColumns(section, columns));
-        if (order) {
-            results.sort((a, b) => {
-                if (a[order] < b[order])
-                    return -1;
-                if (a[order] > b[order])
-                    return 1;
-                return 0;
-            });
-        }
-        if (results.length > 5000) {
-            throw new IInsightFacade_1.ResultTooLargeError("Error: Query results exceed 5000");
-        }
-        return results;
-    }
-    async listDatasets() {
-        await this.initialize();
-        return Array.from(this.datasets.values()).map((dataset) => dataset.metadata);
-    }
-    validateQuery(query) {
-        if (typeof query !== "object" || query === null || Array.isArray(query)) {
-            throw new IInsightFacade_1.InsightError("Error: Query is not an object");
-        }
-        const queryObj = query;
-        if (!("WHERE" in queryObj) || !("OPTIONS" in queryObj)) {
-            throw new IInsightFacade_1.InsightError("Error: Query must contain WHERE and OPTIONS");
-        }
-        const validKeys = new Set(["WHERE", "OPTIONS"]);
-        for (const key of Object.keys(queryObj)) {
-            if (!validKeys.has(key)) {
-                throw new IInsightFacade_1.InsightError("Error: Unexpected query key found");
-            }
-        }
-        this.validateWhere(queryObj.WHERE);
-        this.validateOptions(queryObj.OPTIONS);
-        return this.getDatasetID(queryObj);
-    }
-    validateWhere(where) {
-        if (typeof where !== "object" || where === null || Array.isArray(where)) {
-            throw new IInsightFacade_1.InsightError("Error: WHERE is not an object");
-        }
-        const whereObj = where;
-        const keys = Object.keys(whereObj);
-        if (keys.length === 0)
-            return;
-        if (keys.length > 1) {
-            throw new IInsightFacade_1.InsightError("Error: WHERE must have only one filter");
-        }
-        this.validateFilter(whereObj);
-    }
-    validateFilter(filter) {
-        if (typeof filter !== "object" ||
-            filter === null ||
-            Array.isArray(filter)) {
-            throw new IInsightFacade_1.InsightError("Error: Filter is not an object");
-        }
-        const filterObj = filter;
-        const keys = Object.keys(filterObj);
-        if (keys.length !== 1) {
-            throw new IInsightFacade_1.InsightError("Error: Filter must have exactly one key");
-        }
-        const filterType = keys[0];
-        const filterContent = filterObj[filterType];
-        switch (filterType) {
-            case "NOT":
-                this.validateFilter(filterContent);
-                break;
-            case "AND":
-            case "OR":
-                if (!Array.isArray(filterContent) || filterContent.length === 0) {
-                    throw new IInsightFacade_1.InsightError("Error: Filter must be non-empty array");
-                }
-                for (const subFilter of filterContent) {
-                    this.validateFilter(subFilter);
-                }
-                break;
-            case "LT":
-            case "GT":
-            case "EQ":
-                this.validateComparison(filterContent, "m");
-                break;
-            case "IS":
-                this.validateComparison(filterContent, "s");
-                break;
-            default:
-                throw new IInsightFacade_1.InsightError("Error: Invalid filter type");
-        }
-    }
-    validateComparison(content, type) {
-        if (typeof content !== "object" ||
-            content === null ||
-            Array.isArray(content)) {
-            throw new IInsightFacade_1.InsightError("Error: Comparison content is not an object");
-        }
-        const contentObj = content;
-        const keys = Object.keys(contentObj);
-        if (keys.length !== 1) {
-            throw new IInsightFacade_1.InsightError("Error: Comparison must have exactly one key");
-        }
-        const key = keys[0];
-        this.validateKey(key, type);
-        if (type === "m" && typeof contentObj[key] !== "number") {
-            throw new IInsightFacade_1.InsightError("Error: MComparison value must be a number");
-        }
-        if (type === "s" && typeof contentObj[key] !== "string") {
-            throw new IInsightFacade_1.InsightError("Error: SComparison value must be a string");
-        }
-        if (type === "s") {
-            const value = contentObj[key];
-            let stripped = value;
-            if (value.startsWith("*")) {
-                stripped = value.slice(1);
-            }
-            let final = stripped;
-            if (stripped.endsWith("*")) {
-                final = stripped.slice(0, -1);
-            }
-            if (final.includes("*")) {
-                throw new IInsightFacade_1.InsightError("Error: Wildcards only allowed at start and end");
-            }
-        }
-    }
-    validateKey(key, type) {
-        const parts = key.split("_");
-        if (parts.length !== 2) {
-            throw new IInsightFacade_1.InsightError("Error: Invalid Comparison key format");
-        }
-        const [id, field] = parts;
-        if (id.trim().length === 0) {
-            throw new IInsightFacade_1.InsightError("Error: Empty id");
-        }
-        let validFields;
-        if (type === "m") {
-            validFields = this.validMFields;
-        }
-        else if (type === "s") {
-            validFields = this.validSFields;
-        }
-        else {
-            validFields = [...this.validMFields, ...this.validSFields];
-        }
-        if (!validFields.includes(field)) {
-            throw new IInsightFacade_1.InsightError("Error: Invalid Comparison key field");
-        }
-    }
-    validateOptions(options) {
-        if (typeof options !== "object" ||
-            options === null ||
-            Array.isArray(options)) {
-            throw new IInsightFacade_1.InsightError("Error: OPTIONS is not an object");
-        }
-        const optionsObj = options;
-        const validKeys = new Set(["COLUMNS", "ORDER"]);
-        for (const key of Object.keys(optionsObj)) {
-            if (!validKeys.has(key)) {
-                throw new IInsightFacade_1.InsightError("Error: Unexpected OPTIONS key found");
-            }
-        }
-        if (!("COLUMNS" in optionsObj)) {
-            throw new IInsightFacade_1.InsightError("Error: OPTIONS must contain COLUMNS");
-        }
-        if (!Array.isArray(optionsObj.COLUMNS) || optionsObj.COLUMNS.length === 0) {
-            throw new IInsightFacade_1.InsightError("Error: COLUMNS cannot be an empty array");
-        }
-        for (const key of optionsObj.COLUMNS) {
-            if (typeof key !== "string") {
-                throw new IInsightFacade_1.InsightError("Error: COLUMNS must be an array of strings");
-            }
-            this.validateKey(key);
-        }
-        if ("ORDER" in optionsObj) {
-            if (typeof optionsObj.ORDER !== "string") {
-                throw new IInsightFacade_1.InsightError("Error: ORDER must be a string");
-            }
-            if (!optionsObj.COLUMNS.includes(optionsObj.ORDER)) {
-                throw new IInsightFacade_1.InsightError("Error: ORDER field(s) must be in COLUMNS");
-            }
-            this.validateKey(optionsObj.ORDER);
-        }
-    }
-    getDatasetID(query) {
-        const options = query.OPTIONS;
-        const columns = options.COLUMNS;
-        const ids = new Set(columns.map((key) => key.split("_")[0]));
-        if (ids.size !== 1) {
-            throw new IInsightFacade_1.InsightError("Error: Query references multiple datasets");
-        }
-        return Array.from(ids)[0];
-    }
-    applyFilter(section, filter) {
-        const filterType = Object.keys(filter)[0];
-        const filterContent = filter[filterType];
-        switch (filterType) {
-            case "NOT":
-                return !this.applyFilter(section, filterContent);
-            case "AND":
-                return filterContent.every((subfilter) => this.applyFilter(section, subfilter));
-            case "OR":
-                return filterContent.some((subfilter) => this.applyFilter(section, subfilter));
-            case "LT":
-            case "GT":
-            case "EQ":
-            case "IS":
-                return this.applyComparison(section, filterContent, filterType);
-        }
-        return false;
-    }
-    applyComparison(section, content, comparator) {
-        const key = Object.keys(content)[0];
-        const field = key.split("_")[1];
-        const value = content[key];
-        const sectionValue = section[field];
-        switch (comparator) {
-            case "LT":
-                return sectionValue < value;
-            case "GT":
-                return sectionValue > value;
-            case "EQ":
-                return sectionValue === value;
-            case "IS":
-                const strValue = value;
-                const strSectionValue = sectionValue;
-                if (strValue === "*")
-                    return true;
-                if (strValue.startsWith("*") && strValue.endsWith("*")) {
-                    return strSectionValue.includes(strValue.slice(1, -1));
-                }
-                if (strValue.startsWith("*")) {
-                    return strSectionValue.endsWith(strValue.slice(1));
-                }
-                if (strValue.endsWith("*")) {
-                    return strSectionValue.startsWith(strValue.slice(0, -1));
-                }
-                return strSectionValue === strValue;
-        }
-        return false;
-    }
-    applyColumns(section, columns) {
-        const result = {};
-        for (const col of columns) {
-            const field = col.split("_")[1];
-            result[col] = section[field];
-        }
-        return result;
     }
 }
 exports.default = InsightFacade;
@@ -468,18 +482,17 @@ function parseSection(row) {
 function parseBuildings(html) {
     const buildings = [];
     const document = parse5.parse(html);
-    const table = findBuildingTable(document);
-    if (!table)
+    const buildingListTable = findBuildingTable(document);
+    if (!buildingListTable)
         return buildings;
-    const tableRows = findNode(table, "tbody");
-    if (!tableRows)
+    const tbody = findNode(buildingListTable, "tbody");
+    if (!tbody)
         return buildings;
-    const rows = tableRows.childNodes.filter((node) => node.tagName === "tr");
+    const rows = tbody.childNodes.filter((node) => node.nodeName === "tr");
     for (const row of rows) {
         const building = getBuildingInfo(row);
-        if (building) {
+        if (building)
             buildings.push(building);
-        }
     }
     return buildings;
 }
@@ -504,7 +517,7 @@ function tableHasClass(table, className) {
 }
 function findAllNodes(node, name) {
     const results = [];
-    if (node.tagName === name) {
+    if (node.nodeName === name) {
         results.push(node);
     }
     if (node.childNodes) {
@@ -527,7 +540,7 @@ function getAttribute(node, attrName) {
     return attr ? attr.value : null;
 }
 function findNode(node, name) {
-    if (node.tagName === name)
+    if (node.nodeName === name)
         return node;
     if (node.childNodes) {
         for (const child of node.childNodes) {
@@ -539,7 +552,7 @@ function findNode(node, name) {
     return null;
 }
 function getBuildingInfo(row) {
-    const cells = row.childNodes.filter((node) => node.tagName === "td");
+    const cells = row.childNodes.filter((node) => node.nodeName === "td");
     let link = null;
     let shortname = null;
     let fullname = null;
@@ -561,19 +574,19 @@ function getBuildingInfo(row) {
     }
     if (!link || !shortname || !fullname || !address)
         return null;
-    return { link, shortname, fullname, address };
+    return {
+        link,
+        shortname,
+        fullname,
+        address,
+    };
 }
 function getTextContent(node) {
+    if (node.nodeName === "#text")
+        return node.value;
+    if (node.childNodes) {
+        return node.childNodes.map((child) => getTextContent(child)).join("");
+    }
     return "";
-}
-async function getGeoLocation(address) {
-    const encoded = encodeURIComponent(address);
-    const url = `http://cs310.students.cs.ubc.ca:11316/api/v1/project_team059/${encoded}`;
-    const response = fetch(url);
-    return (await response).json();
-}
-function parseRoomTable(html, building, geo) {
-    const rooms = [];
-    return rooms;
 }
 //# sourceMappingURL=InsightFacade.js.map
