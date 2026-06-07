@@ -9,6 +9,8 @@ import {
 } from "./IInsightFacade";
 import JSZip from "jszip";
 import * as fs from "fs-extra";
+import * as parse5 from "parse5";
+
 /**
  * This is the main programmatic entry point for the project.
  * Method documentation is in IInsightFacade
@@ -78,30 +80,8 @@ export default class InsightFacade implements IInsightFacade {
 		}
 	}
 
-	private async processZipFiles(coursesFolder: JSZip): Promise<any[]> {
-		const promises: Array<Promise<string>> = [];
-		coursesFolder.forEach((relativePath, file) => {
-			promises.push(file.async("string"));
-		});
-
-		const fileContents = await Promise.all(promises);
-		const sections: any[] = [];
-
-		for (const content of fileContents) {
-			try {
-				const parsed = JSON.parse(content);
-				if (parsed.result && Array.isArray(parsed.result)) {
-					sections.push(...parsed.result);
-				}
-			} catch (_err) {
-				continue;
-			}
-		}
-		return sections;
-	}
-
 	public async addDataset(id: string, content: string, kind: InsightDatasetKind): Promise<string[]> {
-		// TODO: Remove this once you implement the methods!
+		// validate id and content
 		await this.initializeDatasets();
 		if (id === "" || id.includes("_") || id.trim().length === 0) {
 			return Promise.reject(new InsightError("Invalid id"));
@@ -109,66 +89,36 @@ export default class InsightFacade implements IInsightFacade {
 		if (this.datasets.has(id)) {
 			return Promise.reject(new InsightError("ID already exists"));
 		}
-		if (kind !== "sections") {
-			return Promise.reject(new InsightError("Invalid kind"));
+		if (content === null || content === undefined) {
+			throw new InsightError("No content provided");
 		}
 
-		const zip = new JSZip();
-		let loadedZip;
-		try {
-			loadedZip = await zip.loadAsync(content, { base64: true });
-		} catch (_err) {
-			// console.error(err);
-			// return Promise.reject(new InsightError("Data couldn't be unzipped!"));
-			throw new InsightError("Data couldn't be unzipped!");
+		// get course files
+		const zip = await JSZip.loadAsync(content, { base64: true });
+		let rows: any[];
+
+		if (kind === InsightDatasetKind.Sections) {
+			rows = await this.parseSections(zip);
+		} else if (kind === InsightDatasetKind.Rooms) {
+			rows = await this.parseRooms(zip);
+		} else {
+			throw new InsightError("Error: Invalid dataset kind");
 		}
 
-		const coursesFolder = loadedZip.folder("courses");
-
-		if (coursesFolder === null) {
-			throw new InsightError("No valid sections found");
-			// return Promise.reject(new InsightError("No 'courses' folder found in dataset"));
-		}
-		//
-		// const promises: Array<Promise<string>> = [];
-		//
-		// coursesFolder.forEach((relativePath, file) => {
-		// 	const fileReadPromise = file.async("string");
-		// 	promises.push(fileReadPromise);
-		// });
-		//newZip.loadAsync(content).then((zip) => {});
-
-		// const fileContents = await Promise.all(promises);
-
-		// const sections: any[] = [];
-		// for (const contentThing of fileContents) {
-		// 	try {
-		// 		const parsed = JSON.parse(contentThing);
-		//
-		// 		if (parsed.result && Array.isArray(parsed.result)) {
-		// 			sections.push(...parsed.result);
-		// 		}
-		// 	} catch (err) {
-		// 		continue;
-		// 	}
-		// }
-
-		const sections = await this.processZipFiles(coursesFolder);
-
-		if (sections.length === 0) {
-			throw new InsightError("No valid sections found");
-			//return Promise.reject(new InsightError("No valid sections found in dataset"));
+		// no valid found in dataset
+		if (rows.length === 0) {
+			throw new InsightError("Error: No valid rows found in dataset");
 		}
 
 		await fs.ensureDir("./data");
-		await fs.writeJson(`./data/${id}.json`, sections);
+		await fs.writeJson(`./data/${id}.json`, rows);
 
 		// const newDataset: InsightDataset = {
 		// 	id: id,
 		// 	kind: kind,
 		// 	numRows: sections.length,
 		// };
-		this.datasets.set(id, { id: id, kind: kind, numRows: sections.length });
+		this.datasets.set(id, { id: id, kind: kind, numRows: rows.length });
 
 		return Array.from(this.datasets.keys());
 	}
@@ -540,4 +490,120 @@ export default class InsightFacade implements IInsightFacade {
 		await this.initializeDatasets();
 		return Array.from(this.datasets.values());
 	}
+
+	private async parseSections(zip: JSZip): Promise<any[]> {
+		const courseFiles = Object.values(zip.files).filter((file) => file.name.startsWith("courses/") && !file.dir);
+
+		if (courseFiles.length === 0) {
+			throw new InsightError("Error: No course files found in dataset");
+		}
+
+		const sections: any[] = [];
+
+		// parse each course file and extract sections
+		await Promise.all(
+			// parse each course
+			courseFiles.map(async (file) => {
+				let course: any;
+				try {
+					const text = await file.async("text");
+					course = JSON.parse(text);
+				} catch {
+					// skip corrupt files
+					return;
+				}
+
+				if (course === null || course === undefined) return;
+				const results = course.result;
+				if (!Array.isArray(results)) return;
+
+				// get sections of a course
+				for (const row of results) {
+					const section = parseSection(row);
+					if (section !== null) {
+						sections.push(section);
+					}
+				}
+			})
+		);
+
+		return sections;
+	}
+
+	private async parseRooms(zip: JSZip): Promise<any[]> {
+		const rooms: any[] = [];
+
+		// get index.htm file
+		const indexFile = zip.file("index.htm");
+		if (!indexFile) {
+			throw new InsightError("Error: No index.htm file found in dataset");
+		}
+
+		// get buildings
+		const indexHtml = await indexFile.async("text");
+		const buildings = parseBuildings(indexHtml);
+
+		// no building files found
+		if (buildings.length === 0) return rooms;
+
+		await Promise.all(
+			buildings.map(async (building) => {
+				const filePath = building.link.replace("./", "");
+				const buildingFile = zip.file(filePath);
+				if (!buildingFile) return;
+
+				const buildingHtml = await buildingFile.async("text");
+			})
+		);
+
+		return rooms;
+	}
+}
+
+// helper to parse (and validate fields of) a section
+function parseSection(row: any): any | null {
+	// special case when Section = overall
+	let year: number;
+	if (row.Section === "overall") {
+		year = 1900;
+	} else {
+		year = Number(row.Year);
+	}
+
+	const hasRequiredFields =
+		row.id !== undefined &&
+		row.Course !== undefined &&
+		row.Title !== undefined &&
+		row.Professor !== undefined &&
+		row.Subject !== undefined &&
+		row.Year !== undefined &&
+		row.Avg !== undefined &&
+		row.Pass !== undefined &&
+		row.Fail !== undefined &&
+		row.Audit !== undefined;
+
+	// missing one or more required fields
+	if (!hasRequiredFields) return null;
+
+	return {
+		uuid: String(row.id),
+		id: String(row.Course),
+		title: String(row.Title),
+		instructor: String(row.Professor),
+		dept: String(row.Subject),
+		year: year,
+		avg: Number(row.Avg),
+		pass: Number(row.Pass),
+		fail: Number(row.Fail),
+		audit: Number(row.Audit),
+	};
+}
+
+// helper to parse building files
+function parseBuildings(html: string): any[] {
+	const buildings: any[] = [];
+
+	const document = parse5.parse(html);
+
+	return buildings;
 }
