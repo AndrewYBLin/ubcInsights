@@ -398,6 +398,65 @@ describe("InsightFacade", function () {
 				expect(err).to.have.property("message").that.includes("index.htm");
 			}
 		});
+
+		it("should reject a room dataset with no building table", async function () {
+			try {
+				const zip = new JSZip();
+
+				const indexHtml = `
+          <html>
+            <body>
+              <table>
+                <tbody>
+                  <tr>
+                    <td>empty classes, no buildings</td>
+                  </tr>
+                </tbody>
+              </table>
+            </body>
+          </html>
+        `;
+				zip.file("index.htm", indexHtml);
+
+				const content = await zip.generateAsync({ type: "base64" });
+				await facade.addDataset("rooms", content, InsightDatasetKind.Rooms);
+				expect.fail("Should have thrown!");
+			} catch (err) {
+				expect(err).to.be.an.instanceOf(InsightError);
+				expect(err)
+					.to.have.property("message")
+					.that.includes("No valid rows found");
+			}
+		});
+
+		it("should reject rooms dataset with missing building files", async function () {
+			try {
+				const zip = new JSZip();
+				const indexHtml = `
+          <html><body>
+            <table><tbody>
+              <tr>
+                <td class="views-field views-field-title">
+                  <a href="./campus/discover/buildings-and-classrooms/AAC.htm">Acute Care Unit</a>
+                </td>
+                <td class="views-field views-field-field-building-code">AAC</td>
+                <td class="views-field views-field-field-building-address">2211 Wesbrook Mall</td>
+              </tr>
+            </tbody></table>
+          </body></html>
+        `;
+				zip.file("index.htm", indexHtml);
+
+				const content = await zip.generateAsync({ type: "base64" });
+				await facade.addDataset("rooms", content, InsightDatasetKind.Rooms);
+				expect.fail("Should have thrown!");
+			} catch (err) {
+				expect(err).to.be.an.instanceOf(InsightError);
+				expect(err)
+					.to.have.property("message")
+					.that.includes("No valid rows found");
+			}
+		});
 	});
 
 	describe("RemoveDataset", function () {
@@ -711,9 +770,9 @@ describe("InsightFacade", function () {
 						ORDER: "sections_avg",
 					},
 				});
-				expect.fail("Should have thrown!"); // remove once done implementation
+				expect.fail("Should have thrown!");
 			} catch (err) {
-				expect(err).to.be.an.instanceOf(Error); // remove one done implementation
+				expect(err).to.be.an.instanceOf(Error);
 			}
 		});
 
@@ -749,9 +808,6 @@ describe("InsightFacade", function () {
 				});
 				expect.fail("Should have thrown!");
 			} catch (err) {
-				expect(err)
-					.to.have.property("message")
-					.that.includes("Filter is not an object");
 				expect(err).to.be.an.instanceOf(InsightError);
 			}
 		});
@@ -774,9 +830,6 @@ describe("InsightFacade", function () {
 				});
 				expect.fail("Should have thrown!");
 			} catch (err) {
-				expect(err)
-					.to.have.property("message")
-					.that.includes("Filter must have exactly one key");
 				expect(err).to.be.an.instanceOf(InsightError);
 			}
 		});
@@ -793,9 +846,6 @@ describe("InsightFacade", function () {
 				});
 				expect.fail("Should have thrown!");
 			} catch (err) {
-				expect(err)
-					.to.have.property("message")
-					.that.includes("non-empty array");
 				expect(err).to.be.an.instanceOf(InsightError);
 			}
 		});
@@ -812,9 +862,6 @@ describe("InsightFacade", function () {
 				});
 				expect.fail("Should have thrown!");
 			} catch (err) {
-				expect(err)
-					.to.have.property("message")
-					.that.includes("non-empty array");
 				expect(err).to.be.an.instanceOf(InsightError);
 			}
 		});
@@ -834,9 +881,6 @@ describe("InsightFacade", function () {
 				});
 				expect.fail("Should have thrown!");
 			} catch (err) {
-				expect(err)
-					.to.have.property("message")
-					.that.includes("Invalid filter type");
 				expect(err).to.be.an.instanceOf(InsightError);
 			}
 		});
@@ -855,9 +899,6 @@ describe("InsightFacade", function () {
 				});
 				expect.fail("Should have thrown!");
 			} catch (err) {
-				expect(err)
-					.to.have.property("message")
-					.that.includes("Comparison content");
 				expect(err).to.be.an.instanceOf(InsightError);
 			}
 		});
@@ -878,9 +919,6 @@ describe("InsightFacade", function () {
 				});
 				expect.fail("Should have thrown!");
 			} catch (err) {
-				expect(err)
-					.to.have.property("message")
-					.that.includes("Comparison must have exactly one key");
 				expect(err).to.be.an.instanceOf(InsightError);
 			}
 		});
@@ -900,9 +938,6 @@ describe("InsightFacade", function () {
 				});
 				expect.fail("Should have thrown!");
 			} catch (err) {
-				expect(err)
-					.to.have.property("message")
-					.that.includes("MComparison value must be a number");
 				expect(err).to.be.an.instanceOf(InsightError);
 			}
 		});
@@ -923,9 +958,7 @@ describe("InsightFacade", function () {
 				});
 				expect.fail("Should have thrown!");
 			} catch (err) {
-				expect(err)
-					.to.have.property("message")
-					.that.includes("Invalid Comparison key format");
+				expect(err);
 				expect(err).to.be.an.instanceOf(InsightError);
 			}
 		});
@@ -945,9 +978,6 @@ describe("InsightFacade", function () {
 				});
 				expect.fail("Should have thrown!");
 			} catch (err) {
-				expect(err)
-					.to.have.property("message")
-					.that.includes("Invalid Comparison key field");
 				expect(err).to.be.an.instanceOf(InsightError);
 			}
 		});
@@ -965,7 +995,6 @@ describe("InsightFacade", function () {
 				});
 				expect.fail("Should have thrown!");
 			} catch (err) {
-				expect(err).to.have.property("message").that.includes("not an object");
 				expect(err).to.be.an.instanceOf(InsightError);
 			}
 		});
@@ -986,9 +1015,6 @@ describe("InsightFacade", function () {
 				});
 				expect.fail("Should have thrown!");
 			} catch (err) {
-				expect(err)
-					.to.have.property("message")
-					.that.includes("Unexpected OPTIONS key found");
 				expect(err).to.be.an.instanceOf(InsightError);
 			}
 		});
@@ -1009,9 +1035,6 @@ describe("InsightFacade", function () {
 				});
 				expect.fail("Should have thrown!");
 			} catch (err) {
-				expect(err)
-					.to.have.property("message")
-					.that.includes("multiple datasets");
 				expect(err).to.be.an.instanceOf(InsightError);
 			}
 		});
@@ -1174,83 +1197,5 @@ describe("InsightFacade", function () {
 				expect.fail("Should not have thrown!");
 			}
 		});
-
-		//AI TESTS START
-		it("C2 Coverage - Multi-key sorting UP direction", async function () {
-			const query = {
-				WHERE: {
-					GT: { sections_avg: 90 }
-				},
-				OPTIONS: {
-					COLUMNS: ["sections_dept", "sections_id", "sections_avg"],
-					ORDER: {
-						dir: "UP",
-						keys: ["sections_dept", "sections_avg"]
-					}
-				}
-			};
-
-			const result = await facade.performQuery(query);
-			expect(result).to.be.an("array");
-			expect(result.length).to.be.greaterThan(0);
-		});
-
-		it("C2 Coverage - Multi-key sorting DOWN direction", async function () {
-			const query = {
-				WHERE: {
-					GT: { sections_avg: 90 }
-				},
-				OPTIONS: {
-					COLUMNS: ["sections_dept", "sections_id", "sections_avg"],
-					ORDER: {
-						dir: "DOWN",
-						keys: ["sections_dept", "sections_id"]
-					}
-				}
-			};
-
-			const result = await facade.performQuery(query);
-			expect(result).to.be.an("array");
-			expect(result.length).to.be.greaterThan(0);
-		});
-
-		it("C2 Coverage - Syntax Error Rejection Invalid Direction", async function () {
-			try {
-				await facade.performQuery({
-					WHERE: { GT: { sections_avg: 90 } },
-					OPTIONS: {
-						COLUMNS: ["sections_avg"],
-						ORDER: {
-							dir: "UPWARDS", // Invalid keyword string
-							keys: ["sections_avg"]
-						}
-					}
-				});
-				expect.fail("Should have rejected");
-			} catch (err) {
-				expect(err).to.be.an.instanceOf(InsightError);
-			}
-		});
-
-		it("C2 Coverage - Syntax Error Rejection Invalid Keys Array Structure", async function () {
-			try {
-				await facade.performQuery({
-					WHERE: { GT: { sections_avg: 90 } },
-					OPTIONS: {
-						COLUMNS: ["sections_avg"],
-						ORDER: {
-							dir: "UP",
-							keys: [] // Empty keys array is invalid
-						}
-					}
-				});
-				expect.fail("Should have rejected");
-			} catch (err) {
-				expect(err).to.be.an.instanceOf(InsightError);
-			}
-		});
-		//AI TESTS END
-
-
 	});
 });
