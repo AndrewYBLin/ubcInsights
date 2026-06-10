@@ -29,11 +29,12 @@ describe("InsightFacade", function () {
 
 	// Declare datasets used in tests. You should add more datasets like this!
 	let sections: string;
+	let rooms: string;
 
 	before(async function () {
 		// This block runs once and loads the datasets.
 		sections = await getContentFromArchives("pair.zip");
-
+		rooms = await getContentFromArchives("campus.zip");
 		// Just in case there is anything hanging around from a previous run of the test suite
 		await clearDisk();
 	});
@@ -457,6 +458,41 @@ describe("InsightFacade", function () {
 					.to.have.property("message")
 					.that.includes("No valid rows found");
 			}
+		});
+	});
+
+	// C2 addDataset test for rooms
+	describe("addDataset - Rooms Kind", function () {
+
+		it("Should successfully add a valid rooms dataset", async function () {
+			const result = await facade.addDataset("rooms-test", rooms, InsightDatasetKind.Rooms);
+
+			// Verifies it returns an array containing all loaded IDs
+			expect(result).to.be.an("array");
+			expect(result).to.include("rooms-test");
+			expect(result.length).to.equal(1);
+		});
+
+		it("Should reject with InsightError if rooms dataset kind is passed but folder content matches sections", async function () {
+			// Feeding it sections zip content while declaring it is an InsightDatasetKind.Rooms kind
+			const action = facade.addDataset("mismatched-kind", sections, InsightDatasetKind.Rooms);
+
+			await expect(action).to.eventually.be.rejectedWith(InsightError);
+		});
+
+		it("Should reject with InsightError if the rooms dataset lacks a root index.htm", async function () {
+			// To get this coverage, generate or pass a fake zip that doesn't have an index.htm file
+			const fakeZipContent = await getContentFromArchives("corrupted_no_index.zip");
+			const action = facade.addDataset("no-index-test", fakeZipContent, InsightDatasetKind.Rooms);
+
+			await expect(action).to.eventually.be.rejectedWith(InsightError);
+		});
+
+		it("Should safely skip buildings with invalid geolocation coordinates or missing internal html records", async function () {
+			const edgeCasesContent = await getContentFromArchives("rooms_edge_cases.zip");
+			const result = await facade.addDataset("rooms-edge", edgeCasesContent, InsightDatasetKind.Rooms);
+
+			expect(result).to.include("rooms-edge");
 		});
 	});
 
@@ -1271,10 +1307,10 @@ describe("InsightFacade", function () {
 	//thirdone
 	it("should successfully hit continue inside processZipFiles when encountering bad JSON", async function () {
 		const zip = new JSZip();
-		
+
 		// 1. Create a valid 'courses/' directory structure inside the zip
 		const folder = zip.folder("courses");
-		
+
 		// 2. Add one perfectly valid course file so dataToStore.length > 0 overall
 		folder?.file("cpsc310.json", JSON.stringify({
 			result: [{ Subject: "CPSC", Course: "310", Avg: 90, Pass: 100, Fail: 0, Audit: 0, id: "123" }]
@@ -1290,10 +1326,10 @@ describe("InsightFacade", function () {
 		try {
 			// 5. Run addDataset
 			const result = await facade.addDataset("corrupted-test", corruptedBase64, InsightDatasetKind.Sections);
-			
+
 			// Assertions to verify the good file saved while the bad one skipped safely
 			expect(result).to.be.an("array").that.includes("corrupted-test");
-			
+
 			const datasets = await facade.listDatasets();
 			const added = datasets.find((d) => d.id === "corrupted-test");
 			expect(added).to.not.be.undefined;
@@ -1340,7 +1376,7 @@ describe("InsightFacade", function () {
 		};
 
 		try {
-			// Ensure you have added the 'sections' dataset in a prior hook or helper 
+			// Ensure you have added the 'sections' dataset in a prior hook or helper
 			// so that the internal parser doesn't reject early on a missing dataset ID.
 			const results = await facade.performQuery(validNegationQuery);
 			expect(results).to.be.an("array");
@@ -1348,18 +1384,18 @@ describe("InsightFacade", function () {
 			// If your dataset isn't loaded it might throw, but it WILL still log line coverage!
 		}
 	});
-	
-	//fifthone 
+
+	//fifthone
 	it("should cover both branches of the year field mapping using raw disk injection", async function () {
 		const concreteFacade = facade as any;
 		const datasetId = "sections";
 		const filePath = `./data/${datasetId}.json`;
 
 		// 1. Manually synchronize the in-memory Map so validateKey passes existence checks
-		concreteFacade["datasets"].set(datasetId, { 
-			id: datasetId, 
-			kind: InsightDatasetKind.Sections, 
-			numRows: 2 
+		concreteFacade["datasets"].set(datasetId, {
+			id: datasetId,
+			kind: InsightDatasetKind.Sections,
+			numRows: 2
 		});
 
 		// 2. Build a fake payload matching your PersistedDataset interface shape
@@ -1377,7 +1413,7 @@ describe("InsightFacade", function () {
 				{
 					Subject: "cpsc",
 					Course: "310",
-					Year: "2024", 
+					Year: "2024",
 					Section: "overall", // Branch B: Forces assignment to 1900
 					id: "2"
 				}
@@ -1401,7 +1437,7 @@ describe("InsightFacade", function () {
 
 		try {
 			const results = await facade.performQuery(yearQuery);
-			
+
 			// 5. Assertions
 			expect(results).to.be.an("array");
 			expect(results.length).to.equal(1);
@@ -1412,11 +1448,11 @@ describe("InsightFacade", function () {
 		}
 	});
 
-	//sixthone 
+	//sixthone
 	// end AI tests
 	});
 
-	// start AI tests 
+	// start AI tests
 	// firstone part2
 
     // Place your new block cleanly inside the main container:
@@ -1426,12 +1462,12 @@ describe("InsightFacade", function () {
         beforeEach(function () {
             // Instantiate an independent sandbox instance for these tests
             transformationFacade = new InsightFacade();
-            
+
             // Bypass private restrictions cleanly on our local reference
-            transformationFacade["datasets"].set("sections", { 
-                id: "sections", 
-                kind: InsightDatasetKind.Sections, 
-                numRows: 10 
+            transformationFacade["datasets"].set("sections", {
+                id: "sections",
+                kind: InsightDatasetKind.Sections,
+                numRows: 10
             });
         });
 
@@ -1439,7 +1475,7 @@ describe("InsightFacade", function () {
             const queryWithArrayTransform = {
                 WHERE: {},
                 OPTIONS: { COLUMNS: ["sections_dept"] },
-                TRANSFORMATIONS: [ "GROUP", "APPLY" ] 
+                TRANSFORMATIONS: [ "GROUP", "APPLY" ]
             };
 
             try {
@@ -1609,7 +1645,7 @@ describe("InsightFacade", function () {
 			// but the validation code for lines 289-333 WILL turn green!
 			await transformationFacade.performQuery(validCountQuery);
 		} catch (err) {
-			expect(err).to.not.equal("Invalid Query"); 
+			expect(err).to.not.equal("Invalid Query");
 		}
 		});
     });
@@ -1716,7 +1752,7 @@ describe("InsightFacade", function () {
                 ORDER: {
                     dir: "UP",
                     // Missing 'keys' array blueprint element
-                    randomField: "sections_dept" 
+                    randomField: "sections_dept"
                 }
             }
         };
@@ -1806,5 +1842,5 @@ describe("InsightFacade", function () {
         }
     });
 });
-	
+
 });
