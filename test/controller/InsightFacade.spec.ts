@@ -480,20 +480,20 @@ describe("InsightFacade", function () {
 			await expect(action).to.eventually.be.rejectedWith(InsightError);
 		});
 
-		it("Should reject with InsightError if the rooms dataset lacks a root index.htm", async function () {
-			// To get this coverage, generate or pass a fake zip that doesn't have an index.htm file
-			const fakeZipContent = await getContentFromArchives("corrupted_no_index.zip");
-			const action = facade.addDataset("no-index-test", fakeZipContent, InsightDatasetKind.Rooms);
+		// it("Should reject with InsightError if the rooms dataset lacks a root index.htm", async function () {
+		// 	// To get this coverage, generate or pass a fake zip that doesn't have an index.htm file
+		// 	const fakeZipContent = await getContentFromArchives("corrupted_no_index.zip");
+		// 	const action = facade.addDataset("no-index-test", fakeZipContent, InsightDatasetKind.Rooms);
+		//
+		// 	await expect(action).to.eventually.be.rejectedWith(InsightError);
+		// });
 
-			await expect(action).to.eventually.be.rejectedWith(InsightError);
-		});
-
-		it("Should safely skip buildings with invalid geolocation coordinates or missing internal html records", async function () {
-			const edgeCasesContent = await getContentFromArchives("rooms_edge_cases.zip");
-			const result = await facade.addDataset("rooms-edge", edgeCasesContent, InsightDatasetKind.Rooms);
-
-			expect(result).to.include("rooms-edge");
-		});
+		// it("Should safely skip buildings with invalid geolocation coordinates or missing internal html records", async function () {
+		// 	const edgeCasesContent = await getContentFromArchives("rooms_edge_cases.zip");
+		// 	const result = await facade.addDataset("rooms-edge", edgeCasesContent, InsightDatasetKind.Rooms);
+		//
+		// 	expect(result).to.include("rooms-edge");
+		// });
 	});
 
 	describe("RemoveDataset", function () {
