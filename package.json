@@ -11,7 +11,7 @@
 	"dependencies": {
 		"@ubccpsc310/project-support": "^4.0.0",
 		"cors": "2.8.5",
-		"decimal.js": "10.6.0",
+		"decimal.js": "^10.6.0",
 		"express": "5.1.0",
 		"fs-extra": "11.3.1",
 		"http-status-codes": "2.3.0",
