@@ -15,7 +15,6 @@ export interface GeoResponse {
 }
 
 export class RoomParser {
-
 	public parseIndex(indexHtmlContent: string): ParsedBuilding[] {
 		const parsedDocument = parse5.parse(indexHtmlContent);
 		const discoveredBuildings: ParsedBuilding[] = [];
@@ -177,7 +176,7 @@ export class RoomParser {
 					seats: seats,
 					type: type,
 					furniture: furniture,
-					href: href
+					href: href,
 				});
 			}
 		}
@@ -194,24 +193,24 @@ export class RoomParser {
 		const url = `http://cs310.students.cs.ubc.ca:11316/api/v1/project_team${teamNum}/${encodedAddress}`;
 
 		return new Promise((resolve, reject) => {
-			http.get(url, (res) => {
-				let rawData = "";
-				res.on("data", (chunk) => {
-					rawData += chunk;
+			http
+				.get(url, (res) => {
+					let rawData = "";
+					res.on("data", (chunk) => {
+						rawData += chunk;
+					});
+					res.on("end", () => {
+						try {
+							const parsedData: GeoResponse = JSON.parse(rawData);
+							resolve(parsedData);
+						} catch (e) {
+							resolve({ error: "Failed to parse coordinate response payload" });
+						}
+					});
+				})
+				.on("error", (err) => {
+					resolve({ error: err.message });
 				});
-				res.on("end", () => {
-					try {
-						const parsedData: GeoResponse = JSON.parse(rawData);
-						resolve(parsedData);
-					} catch (e) {
-						resolve({ error: "Failed to parse coordinate response payload" });
-					}
-				});
-			}).on("error", (err) => {
-				resolve({ error: err.message });
-			});
 		});
 	}
 }
-
-

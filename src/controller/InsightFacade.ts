@@ -37,10 +37,27 @@ export default class InsightFacade implements IInsightFacade {
 
 	// Internal mappings for programmatic resolution
 	private fieldToKey: { [key: string]: string } = {
-		avg: "Avg", pass: "Pass", fail: "Fail", audit: "Audit", year: "Year",
-		dept: "Subject", id: "Course", instructor: "Professor", title: "Title", uuid: "id",
-		lat: "lat", lon: "lon", seats: "seats", fullname: "fullname", shortname: "shortname",
-		number: "number", name: "name", address: "address", type: "type", furniture: "furniture", href: "href"
+		avg: "Avg",
+		pass: "Pass",
+		fail: "Fail",
+		audit: "Audit",
+		year: "Year",
+		dept: "Subject",
+		id: "Course",
+		instructor: "Professor",
+		title: "Title",
+		uuid: "id",
+		lat: "lat",
+		lon: "lon",
+		seats: "seats",
+		fullname: "fullname",
+		shortname: "shortname",
+		number: "number",
+		name: "name",
+		address: "address",
+		type: "type",
+		furniture: "furniture",
+		href: "href",
 	};
 
 	constructor() {
@@ -57,13 +74,16 @@ export default class InsightFacade implements IInsightFacade {
 			const jsonFiles = files.filter((file) => file.endsWith(".json"));
 
 			const readPromises = jsonFiles.map(async (fileName) => {
-				return fs.readJson(`./data/${fileName}`).then((meta: PersistedDataset) => {
-					return {
-						id: meta.id,
-						kind: meta.kind,
-						numRows: meta.data.length,
-					};
-				}).catch(() => null);
+				return fs
+					.readJson(`./data/${fileName}`)
+					.then((meta: PersistedDataset) => {
+						return {
+							id: meta.id,
+							kind: meta.kind,
+							numRows: meta.data.length,
+						};
+					})
+					.catch(() => null);
 			});
 
 			try {
@@ -105,8 +125,6 @@ export default class InsightFacade implements IInsightFacade {
 		return sections;
 	}
 
-
-
 	public async addDataset(id: string, content: string, kind: InsightDatasetKind): Promise<string[]> {
 		await this.initializeDatasets();
 		if (id === "" || id.includes("_") || id.trim().length === 0) {
@@ -114,6 +132,9 @@ export default class InsightFacade implements IInsightFacade {
 		}
 		if (this.datasets.has(id)) {
 			return Promise.reject(new InsightError("ID already exists"));
+		}
+		if (content === null || content === undefined) {
+			throw new InsightError("No content provided");
 		}
 
 		let dataToStore: any[] = [];
@@ -130,9 +151,8 @@ export default class InsightFacade implements IInsightFacade {
 			if (coursesFolder === null) {
 				throw new InsightError("No 'courses' folder found");
 			}
-			dataToStore = await this.processZipFiles(coursesFolder);}
-
-		else if (kind === InsightDatasetKind.Rooms) {
+			dataToStore = await this.processZipFiles(coursesFolder);
+		} else if (kind === InsightDatasetKind.Rooms) {
 			const zip = new JSZip();
 			let loadedZip;
 			try {
@@ -156,38 +176,37 @@ export default class InsightFacade implements IInsightFacade {
 
 			const parsedRoomsAccumulator: any[] = [];
 
-			// Asynchronously process metadata records discovered
-			for (const building of buildingsToProcess) {
-				// 1. Unpack geolocation coordinates
-				const coords = await roomParser.getCoordinates(building.address);
+			await Promise.all(
+				buildingsToProcess.map(async (building) => {
+					// 1. Unpack geolocation coordinates
+					const coords = await roomParser.getCoordinates(building.address);
 
-				// Guard check: Per project specification, if a building has an unresolvable geolocation response,
-				// skip processing its interior rooms entirely.
-				if (coords.error || coords.lat === undefined || coords.lon === undefined) {
-					continue;
-				}
+					// Guard check: Per project specification, if a building has an unresolvable geolocation response,
+					// skip processing its interior rooms entirely.
+					if (coords.error || coords.lat === undefined || coords.lon === undefined) {
+						return;
+					}
 
-				// Attach coordinates to our target object blueprint
-				const enrichedBuilding = {
-					...building,
-					lat: coords.lat,
-					lon: coords.lon
-				};
+					// Attach coordinates to our target object blueprint
+					const enrichedBuilding = {
+						...building,
+						lat: coords.lat,
+						lon: coords.lon,
+					};
 
-				// 2. Clean zip paths by scrubbing away explicit dot indicators ("./")
-				const cleanZipPath = building.pathLink.startsWith("./")
-					? building.pathLink.substring(2)
-					: building.pathLink;
+					// 2. Clean zip paths by scrubbing away explicit dot indicators ("./")
+					const cleanZipPath = building.pathLink.startsWith("./") ? building.pathLink.substring(2) : building.pathLink;
 
-				const buildingFile = loadedZip.file(cleanZipPath);
-				if (buildingFile !== null) {
-					const buildingHtmlContent = await buildingFile.async("string");
-					const roomsInsideBuilding = roomParser.parseBuildingRooms(buildingHtmlContent, enrichedBuilding);
+					const buildingFile = loadedZip.file(cleanZipPath);
+					if (buildingFile !== null) {
+						const buildingHtmlContent = await buildingFile.async("string");
+						const roomsInsideBuilding = roomParser.parseBuildingRooms(buildingHtmlContent, enrichedBuilding);
 
-					// Gather all successfully parsed individual classrooms
-					parsedRoomsAccumulator.push(...roomsInsideBuilding);
-				}
-			}
+						// Gather all successfully parsed individual classrooms
+						parsedRoomsAccumulator.push(...roomsInsideBuilding);
+					}
+				}),
+			);
 
 			// 3. CRITICAL: Bind the accumulated array back across your core payload definitions
 			dataToStore = parsedRoomsAccumulator;
@@ -394,7 +413,8 @@ export default class InsightFacade implements IInsightFacade {
 
 	private isOptionsValid(options: any, hasTransform: boolean): boolean {
 		if (typeof options !== "object" || options === null || Array.isArray(options)) return false;
-		if (!Object.keys(options).includes("COLUMNS") || !Array.isArray(options.COLUMNS) || options.COLUMNS.length === 0) return false;
+		if (!Object.keys(options).includes("COLUMNS") || !Array.isArray(options.COLUMNS) || options.COLUMNS.length === 0)
+			return false;
 
 		for (const columnKey of options.COLUMNS) {
 			if (columnKey.includes("_")) {
