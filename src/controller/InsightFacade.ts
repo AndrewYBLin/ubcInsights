@@ -7,10 +7,8 @@ import {
 	NotFoundError,
 	ResultTooLargeError,
 } from "./IInsightFacade";
-import { RoomParser } from "./RoomParser";
 import JSZip from "jszip";
 import * as fs from "fs-extra";
-import Decimal from "decimal.js";
 import * as parse5 from "parse5";
 
 // Internal structure used to save dataset state to disk along with its metadata
@@ -161,58 +159,6 @@ export default class InsightFacade implements IInsightFacade {
 				throw new InsightError("Data couldn't be unzipped!");
 			}
 			dataToStore = await this.parseRooms(zip);
-
-			/*
-			const indexFile = loadedZip.file("index.htm");
-			if (indexFile === null) {
-				throw new InsightError("Missing index.htm file at root");
-			}
-
-			const indexHtmlContent = await indexFile.async("string");
-			const roomParser = new RoomParser();
-			const buildingsToProcess = roomParser.parseIndex(indexHtmlContent);
-
-			if (buildingsToProcess.length === 0) {
-				throw new InsightError("No valid buildings metadata discovered in index.htm");
-			}
-
-			const parsedRoomsAccumulator: any[] = [];
-
-			await Promise.all(
-				buildingsToProcess.map(async (building) => {
-					// 1. Unpack geolocation coordinates
-					const coords = await roomParser.getCoordinates(building.address);
-
-					// Guard check: Per project specification, if a building has an unresolvable geolocation response,
-					// skip processing its interior rooms entirely.
-					if (coords.error || coords.lat === undefined || coords.lon === undefined) {
-						return;
-					}
-
-					// Attach coordinates to our target object blueprint
-					const enrichedBuilding = {
-						...building,
-						lat: coords.lat,
-						lon: coords.lon,
-					};
-
-					// 2. Clean zip paths by scrubbing away explicit dot indicators ("./")
-					const cleanZipPath = building.pathLink.startsWith("./") ? building.pathLink.substring(2) : building.pathLink;
-
-					const buildingFile = loadedZip.file(cleanZipPath);
-					if (buildingFile !== null) {
-						const buildingHtmlContent = await buildingFile.async("string");
-						const roomsInsideBuilding = roomParser.parseBuildingRooms(buildingHtmlContent, enrichedBuilding);
-
-						// Gather all successfully parsed individual classrooms
-						parsedRoomsAccumulator.push(...roomsInsideBuilding);
-					}
-				})
-			);
-
-			// 3. CRITICAL: Bind the accumulated array back across your core payload definitions
-			dataToStore = parsedRoomsAccumulator;
-			*/
 		}
 
 		if (dataToStore.length === 0) {
