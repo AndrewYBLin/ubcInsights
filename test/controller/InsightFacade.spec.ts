@@ -459,6 +459,23 @@ describe("InsightFacade", function () {
     });
   });
 
+  describe("AddDataset_Rooms", function () {
+    let rooms: string;
+
+    before(async function () {
+      rooms = await getContentFromArchives("campus.zip");
+    });
+
+    it("should add a valid rooms dataset", async function () {
+      const result = await facade.addDataset(
+        "rooms",
+        rooms,
+        InsightDatasetKind.Rooms,
+      );
+      expect(result).to.deep.equal(["rooms"]);
+    });
+  });
+
   describe("RemoveDataset", function () {
     it("should reject with a blank dataset id", async function () {
       try {
