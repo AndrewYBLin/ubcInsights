@@ -10,6 +10,9 @@ import {
 import JSZip from "jszip";
 import * as fs from "fs-extra";
 import * as parse5 from "parse5";
+import Decimal from "decimal.js";
+
+
 
 // wow let me push ubc vpn
 
@@ -601,7 +604,7 @@ export default class InsightFacade implements IInsightFacade {
 				for (const row of bucketRows) {
 					sum = sum.add(new Decimal(this.extractValue(row, targetKey)));
 				}
-				results[applyKey] = sum.toNumber();
+				results[applyKey] = Number(sum.toFixed(2));
 			} else if (token === "AVG") {
 				let sum = new Decimal(0);
 				for (const row of bucketRows) {
@@ -636,7 +639,13 @@ export default class InsightFacade implements IInsightFacade {
 			const aggregations = this.applyTransformations(bucketRows, applyRules);
 			Object.assign(resultRecord, aggregations);
 
-			finalResults.push(resultRecord);
+			const filteredRecord: InsightResult = {};
+			for (const col of columns) {
+				if (resultRecord[col] !== undefined) {
+					filteredRecord[col] = resultRecord[col];
+				}
+			}
+			finalResults.push(filteredRecord);
 		}
 
 		return finalResults;
