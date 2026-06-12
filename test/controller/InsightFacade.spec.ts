@@ -375,7 +375,7 @@ describe("InsightFacade", function () {
 				expect.fail("Should have thrown!");
 			} catch (err) {
 				expect(err).to.be.an.instanceOf(InsightError);
-				expect(err).to.have.property("message").that.includes("No valid rows found");
+				expect(err).to.have.property("message").that.includes("No valid elements parsed");
 			}
 		});
 
@@ -402,7 +402,7 @@ describe("InsightFacade", function () {
 				expect.fail("Should have thrown!");
 			} catch (err) {
 				expect(err).to.be.an.instanceOf(InsightError);
-				expect(err).to.have.property("message").that.includes("No valid rows found");
+				expect(err).to.have.property("message").that.includes("No valid elements parsed");
 			}
 		});
 	});
