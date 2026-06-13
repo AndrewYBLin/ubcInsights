@@ -439,6 +439,82 @@ describe("InsightFacade", function () {
 		//
 		// 	expect(result).to.include("rooms-edge");
 		// });
+		it("should successfully add one valid rooms dataset", async function () {
+			try {
+				const result = await facade.addDataset("rooms", rooms, InsightDatasetKind.Rooms);
+				expect(result).to.deep.equal(["rooms"]);
+			} catch (err) {
+				expect.fail("Should not have thrown!");
+			}
+		});
+
+		it("should successfully add one rooms and sections dataset", async function () {
+			try {
+				await facade.addDataset("sections", sections, InsightDatasetKind.Sections);
+				const result = await facade.addDataset("rooms", rooms, InsightDatasetKind.Rooms);
+				expect(result).to.have.length(2);
+				expect(result).to.have.members(["rooms", "sections"]);
+			} catch (err) {
+				expect.fail("Should not have thrown!");
+			}
+		});
+
+		it("should successfully persist rooms dataset to disk", async function () {
+			try {
+				await facade.addDataset("rooms", rooms, InsightDatasetKind.Rooms);
+
+				// simulate restart
+				const facade2 = new InsightFacade();
+				const result = await facade2.listDatasets();
+
+				expect(result).to.have.length(1);
+				expect(result[0].id).to.equal("rooms");
+				expect(result[0].kind).to.equal(InsightDatasetKind.Rooms);
+				expect(result[0].numRows).to.be.greaterThan(0);
+			} catch (err) {
+				expect.fail("Should not have thrown!");
+			}
+		});
+
+		it("should not persist removed rooms dataset", async function () {
+			try {
+				await facade.addDataset("rooms", rooms, InsightDatasetKind.Rooms);
+				await facade.removeDataset("rooms");
+
+				const facade2 = new InsightFacade();
+				const result = await facade2.listDatasets();
+				expect(result).to.have.length(0);
+			} catch (err) {
+				expect.fail("Should not have thrown!");
+			}
+		});
+	});
+
+	// AI geolocation tests
+	describe("Geolocation", function () {
+		it("should return valid coordinates for a known UBC address", async function () {
+			const address = "6245 Agronomy Road V6T 1Z4";
+			const encodedAddress = encodeURIComponent(address);
+			const url = `http://cs310.students.cs.ubc.ca:11316/api/v1/project_team059/${encodedAddress}`;
+
+			const response = await fetch(url);
+			expect(response.ok).to.equal(true);
+
+			const data = (await response.json()) as { lat?: number; lon?: number; error?: string };
+			expect(data.error).to.be.undefined;
+			expect(data.lat).to.be.a("number");
+			expect(data.lon).to.be.a("number");
+		});
+
+		it("should return an error for an invalid address", async function () {
+			const address = "this is not a real address";
+			const encodedAddress = encodeURIComponent(address);
+			const url = `http://cs310.students.cs.ubc.ca:11316/api/v1/project_team059/${encodedAddress}`;
+
+			const response = await fetch(url);
+			const data = (await response.json()) as { lat?: number; lon?: number; error?: string };
+			expect(data.error).to.be.a("string");
+		});
 	});
 
 	describe("RemoveDataset", function () {
