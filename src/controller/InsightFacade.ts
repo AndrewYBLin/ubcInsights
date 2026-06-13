@@ -7,10 +7,14 @@ import {
 	NotFoundError,
 	ResultTooLargeError,
 } from "./IInsightFacade";
-import { RoomParser } from "./RoomParser";
 import JSZip from "jszip";
 import * as fs from "fs-extra";
+import * as parse5 from "parse5";
 import Decimal from "decimal.js";
+
+
+
+// wow let me push ubc vpn
 
 // Internal structure used to save dataset state to disk along with its metadata
 interface PersistedDataset {
@@ -37,10 +41,27 @@ export default class InsightFacade implements IInsightFacade {
 
 	// Internal mappings for programmatic resolution
 	private fieldToKey: { [key: string]: string } = {
-		avg: "Avg", pass: "Pass", fail: "Fail", audit: "Audit", year: "Year",
-		dept: "Subject", id: "Course", instructor: "Professor", title: "Title", uuid: "id",
-		lat: "lat", lon: "lon", seats: "seats", fullname: "fullname", shortname: "shortname",
-		number: "number", name: "name", address: "address", type: "type", furniture: "furniture", href: "href"
+		avg: "Avg",
+		pass: "Pass",
+		fail: "Fail",
+		audit: "Audit",
+		year: "Year",
+		dept: "Subject",
+		id: "Course",
+		instructor: "Professor",
+		title: "Title",
+		uuid: "id",
+		lat: "lat",
+		lon: "lon",
+		seats: "seats",
+		fullname: "fullname",
+		shortname: "shortname",
+		number: "number",
+		name: "name",
+		address: "address",
+		type: "type",
+		furniture: "furniture",
+		href: "href",
 	};
 
 	constructor() {
@@ -57,13 +78,16 @@ export default class InsightFacade implements IInsightFacade {
 			const jsonFiles = files.filter((file) => file.endsWith(".json"));
 
 			const readPromises = jsonFiles.map(async (fileName) => {
-				return fs.readJson(`./data/${fileName}`).then((meta: PersistedDataset) => {
-					return {
-						id: meta.id,
-						kind: meta.kind,
-						numRows: meta.data.length,
-					};
-				}).catch(() => null);
+				return fs
+					.readJson(`./data/${fileName}`)
+					.then((meta: PersistedDataset) => {
+						return {
+							id: meta.id,
+							kind: meta.kind,
+							numRows: meta.data.length,
+						};
+					})
+					.catch(() => null);
 			});
 
 			try {
@@ -105,8 +129,6 @@ export default class InsightFacade implements IInsightFacade {
 		return sections;
 	}
 
-
-
 	public async addDataset(id: string, content: string, kind: InsightDatasetKind): Promise<string[]> {
 		await this.initializeDatasets();
 		if (id === "" || id.includes("_") || id.trim().length === 0) {
@@ -114,6 +136,9 @@ export default class InsightFacade implements IInsightFacade {
 		}
 		if (this.datasets.has(id)) {
 			return Promise.reject(new InsightError("ID already exists"));
+		}
+		if (content === null || content === undefined) {
+			throw new InsightError("No content provided");
 		}
 
 		let dataToStore: any[] = [];
@@ -130,67 +155,15 @@ export default class InsightFacade implements IInsightFacade {
 			if (coursesFolder === null) {
 				throw new InsightError("No 'courses' folder found");
 			}
-			dataToStore = await this.processZipFiles(coursesFolder);}
-
-		else if (kind === InsightDatasetKind.Rooms) {
+			dataToStore = await this.processZipFiles(coursesFolder);
+		} else if (kind === InsightDatasetKind.Rooms) {
 			const zip = new JSZip();
-			let loadedZip;
 			try {
-				loadedZip = await zip.loadAsync(content, { base64: true });
+				await zip.loadAsync(content, { base64: true });
 			} catch (_err) {
 				throw new InsightError("Data couldn't be unzipped!");
 			}
-
-			const indexFile = loadedZip.file("index.htm");
-			if (indexFile === null) {
-				throw new InsightError("Missing index.htm file at root");
-			}
-
-			const indexHtmlContent = await indexFile.async("string");
-			const roomParser = new RoomParser();
-			const buildingsToProcess = roomParser.parseIndex(indexHtmlContent);
-
-			if (buildingsToProcess.length === 0) {
-				throw new InsightError("No valid buildings metadata discovered in index.htm");
-			}
-
-			const parsedRoomsAccumulator: any[] = [];
-
-			// Asynchronously process metadata records discovered
-			for (const building of buildingsToProcess) {
-				// 1. Unpack geolocation coordinates
-				const coords = await roomParser.getCoordinates(building.address);
-
-				// Guard check: Per project specification, if a building has an unresolvable geolocation response,
-				// skip processing its interior rooms entirely.
-				if (coords.error || coords.lat === undefined || coords.lon === undefined) {
-					continue;
-				}
-
-				// Attach coordinates to our target object blueprint
-				const enrichedBuilding = {
-					...building,
-					lat: coords.lat,
-					lon: coords.lon
-				};
-
-				// 2. Clean zip paths by scrubbing away explicit dot indicators ("./")
-				const cleanZipPath = building.pathLink.startsWith("./")
-					? building.pathLink.substring(2)
-					: building.pathLink;
-
-				const buildingFile = loadedZip.file(cleanZipPath);
-				if (buildingFile !== null) {
-					const buildingHtmlContent = await buildingFile.async("string");
-					const roomsInsideBuilding = roomParser.parseBuildingRooms(buildingHtmlContent, enrichedBuilding);
-
-					// Gather all successfully parsed individual classrooms
-					parsedRoomsAccumulator.push(...roomsInsideBuilding);
-				}
-			}
-
-			// 3. CRITICAL: Bind the accumulated array back across your core payload definitions
-			dataToStore = parsedRoomsAccumulator;
+			dataToStore = await this.parseRooms(zip);
 		}
 
 		if (dataToStore.length === 0) {
@@ -203,6 +176,40 @@ export default class InsightFacade implements IInsightFacade {
 
 		this.datasets.set(id, { id, kind, numRows: dataToStore.length });
 		return Array.from(this.datasets.keys());
+	}
+
+	private async parseRooms(zip: JSZip): Promise<any[]> {
+		const rooms: any[] = [];
+
+		// get index.htm file
+		const indexFile = zip.file("index.htm");
+		if (!indexFile) {
+			throw new InsightError("Error: No index.htm file found in dataset");
+		}
+
+		// get buildings
+		const indexHtml = await indexFile.async("text");
+		const buildings = parseBuildings(indexHtml);
+		if (buildings.length === 0) return rooms;
+
+		// asynchronously retrieve valid buildings and their fields
+		await Promise.all(
+			buildings.map(async (building) => {
+				// get building geolocation
+				const geo = await getGeoLocation(building.address);
+				if (!geo || geo.error) return;
+
+				const filePath = building.link.replace("./", "");
+				const buildingFile = zip.file(filePath);
+				if (!buildingFile) return;
+
+				const buildingHtml = await buildingFile.async("text");
+				const buildingRooms = parseRoomTable(buildingHtml, building, geo);
+				rooms.push(...buildingRooms);
+			})
+		);
+
+		return rooms;
 	}
 
 	public async removeDataset(id: string): Promise<string> {
@@ -295,39 +302,85 @@ export default class InsightFacade implements IInsightFacade {
 		return false;
 	}
 
-	private isSectionValid(section: any, filter: any): boolean {
+	// this was for C1 but now we gotta deal with rooms too
+	// private isSectionValid(section: any, filter: any): boolean {
+	// 	const key = Object.keys(filter)[0];
+	// 	const content = filter[key];
+	//
+	// 	switch (key) {
+	// 		case "AND":
+	// 			return content.every((subFilter: any) => this.isSectionValid(section, subFilter));
+	// 		case "OR":
+	// 			return content.some((subFilter: any) => this.isSectionValid(section, subFilter));
+	// 		case "NOT":
+	// 			return !this.isSectionValid(section, content);
+	// 		case "GT":
+	// 			return this.handleMComp(section, content, (a, b) => a > b);
+	// 		case "LT":
+	// 			return this.handleMComp(section, content, (a, b) => a < b);
+	// 		case "EQ":
+	// 			return this.handleMComp(section, content, (a, b) => a === b);
+	// 		case "IS":
+	// 			return this.handleSComp(section, content);
+	// 		default:
+	// 			return true;
+	// 	}
+	// }
+
+	private isRowValid(row: any, filter: any): boolean {
 		const key = Object.keys(filter)[0];
 		const content = filter[key];
 
 		switch (key) {
 			case "AND":
-				return content.every((subFilter: any) => this.isSectionValid(section, subFilter));
+				return content.every((subFilter: any) => this.isRowValid(row, subFilter));
 			case "OR":
-				return content.some((subFilter: any) => this.isSectionValid(section, subFilter));
+				return content.some((subFilter: any) => this.isRowValid(row, subFilter));
 			case "NOT":
-				return !this.isSectionValid(section, content);
+				return !this.isRowValid(row, content);
 			case "GT":
-				return this.handleMComp(section, content, (a, b) => a > b);
+				return this.handleMComp(row, content, (a, b) => a > b);
 			case "LT":
-				return this.handleMComp(section, content, (a, b) => a < b);
+				return this.handleMComp(row, content, (a, b) => a < b);
 			case "EQ":
-				return this.handleMComp(section, content, (a, b) => a === b);
+				return this.handleMComp(row, content, (a, b) => a === b);
 			case "IS":
-				return this.handleSComp(section, content);
+				return this.handleSComp(row, content);
 			default:
 				return true;
 		}
 	}
 
-	private handleMComp(section: any, comparison: any, op: (a: number, b: number) => boolean): boolean {
+	// private handleMComp(section: any, comparison: any, op: (a: number, b: number) => boolean): boolean {
+	// 	const queryKey = Object.keys(comparison)[0];
+	// 	const targetValue = comparison[queryKey];
+	// 	const field = queryKey.split("_")[1];
+	//
+	// 	let sectionValue = section[this.fieldToKey[field]];
+	// 	if (field === "year") {
+	// 		sectionValue = section.Section === "overall" ? this.overallNumber : parseInt(sectionValue, 10);
+	// 	}
+	// 	return op(Number(sectionValue), targetValue);
+	// }
+
+	private handleMComp(row: any, comparison: any, op: (a: number, b: number) => boolean): boolean {
 		const queryKey = Object.keys(comparison)[0];
 		const targetValue = comparison[queryKey];
-		const field = queryKey.split("_")[1];
+		const parts = queryKey.split("_");
+		const id = parts[0];
+		const field = parts[1];
 
-		let sectionValue = section[this.fieldToKey[field]];
-		if (field === "year") {
-			sectionValue = section.Section === "overall" ? this.overallNumber : parseInt(sectionValue, 10);
+		// 1. Get the dataset kind dynamically from your storage map
+		const kind = this.datasets.get(id)!.kind;
+
+		// 2. Fetch the raw value (use your existing mapping dictionary)
+		let sectionValue = row[this.fieldToKey[field]];
+
+		// 3. Apply dataset-specific logic only when necessary
+		if (kind === InsightDatasetKind.Sections && field === "year") {
+			sectionValue = row.Section === "overall" ? 1900 : parseInt(sectionValue, 10);
 		}
+
 		return op(Number(sectionValue), targetValue);
 	}
 
@@ -394,7 +447,8 @@ export default class InsightFacade implements IInsightFacade {
 
 	private isOptionsValid(options: any, hasTransform: boolean): boolean {
 		if (typeof options !== "object" || options === null || Array.isArray(options)) return false;
-		if (!Object.keys(options).includes("COLUMNS") || !Array.isArray(options.COLUMNS) || options.COLUMNS.length === 0) return false;
+		if (!Object.keys(options).includes("COLUMNS") || !Array.isArray(options.COLUMNS) || options.COLUMNS.length === 0)
+			return false;
 
 		for (const columnKey of options.COLUMNS) {
 			if (columnKey.includes("_")) {
@@ -540,6 +594,7 @@ export default class InsightFacade implements IInsightFacade {
 		return results;
 	}
 
+
 	/**
 	 * Partitions row records into collections sharing exact matching field properties.
 	 * @param filteredData The filtered dataset array right after the WHERE clause step.
@@ -570,69 +625,154 @@ export default class InsightFacade implements IInsightFacade {
 		return groupBucketsMap;
 	}
 
-	public async performQuery(query: unknown): Promise<InsightResult[]> {
-		this.currentQueryId = "";
-		await this.initializeDatasets();
+	private applyTransformations(bucketRows: any[], applyRules: any[]): Record<string, number> {
+		const results: Record<string, number> = {};
 
-		if (typeof query !== "object" || query === null || Array.isArray(query)) {
-			return Promise.reject(new InsightError("Query must be an object"));
-		}
-		if (!this.isQueryValid(query)) {
-			return Promise.reject(new InsightError("Invalid Query"));
-		}
+		for (const rule of applyRules) {
+			// rule format: { "maxSeats": { "MAX": "rooms_seats" } }
+			const applyKey = Object.keys(rule)[0];
+			const tokenObj = rule[applyKey];
+			const token = Object.keys(tokenObj)[0];
+			const targetKey = tokenObj[token];
 
-		const queryObj = query as any;
-		const rawPayload = await this.loadDatasetFromDisk(this.currentQueryId);
-
-		const filteredResults = rawPayload.filter((row) => {
-			if (Object.keys(queryObj.WHERE).length === 0) return true;
-			return this.isSectionValid(row, queryObj.WHERE);
-		});
-
-		let processedResults: InsightResult[] = [];
-
-		if (queryObj.TRANSFORMATIONS) {
-			processedResults = this.groupAndApply(filteredResults, queryObj.TRANSFORMATIONS, queryObj.OPTIONS.COLUMNS);
-		} else {
-			// If no transformation occurs, map data directly across columns
-			processedResults = filteredResults.map((row) => {
-				const res: InsightResult = {};
-				for (const col of queryObj.OPTIONS.COLUMNS) {
-					res[col] = this.extractValue(row, col);
+			if (token === "MAX") {
+				results[applyKey] = Math.max(...bucketRows.map((r) => this.extractValue(r, targetKey)));
+			} else if (token === "MIN") {
+				results[applyKey] = Math.min(...bucketRows.map((r) => this.extractValue(r, targetKey)));
+			} else if (token === "COUNT") {
+				// Count unique values using a Set
+				const uniqueValues = new Set(bucketRows.map((r) => this.extractValue(r, targetKey)));
+				results[applyKey] = uniqueValues.size;
+			} else if (token === "SUM") {
+				let sum = new Decimal(0);
+				for (const row of bucketRows) {
+					sum = sum.add(new Decimal(this.extractValue(row, targetKey)));
 				}
-				return res;
-			});
+				results[applyKey] = Number(sum.toFixed(2));
+			} else if (token === "AVG") {
+				let sum = new Decimal(0);
+				for (const row of bucketRows) {
+					sum = sum.add(new Decimal(this.extractValue(row, targetKey)));
+				}
+				// AVG formula: total / count, rounded to 2 decimals
+				const avg = sum.dividedBy(bucketRows.length);
+				results[applyKey] = Number(avg.toFixed(2));
+			}
 		}
+		return results;
+	}
 
-		if (processedResults.length > this.resultLimit) {
-			throw new ResultTooLargeError("Result set capped at 5000");
-		}
+	private executeTransformations(filteredData: any[], transformations: any, columns: string[]): InsightResult[] {
+		const groupKeys: string[] = transformations.GROUP;
+		const applyRules: any[] = transformations.APPLY;
 
-		// --- C2 ADVANCED MULTI-KEY SORT ENGINE ---
-		if (queryObj.OPTIONS.ORDER) {
-			const order = queryObj.OPTIONS.ORDER;
-			let sortKeys: string[] = [];
-			let isDescending = false;
+		// Use the grouping helper we discussed previously
+		const groups = this.partitionIntoGroups(filteredData, groupKeys);
+		const finalResults: InsightResult[] = [];
 
-			if (typeof order === "string") {
-				sortKeys = [order];
-			} else {
-				sortKeys = order.keys;
-				isDescending = order.dir === "DOWN";
+		for (const [bucketId, bucketRows] of groups.entries()) {
+			const representativeRow = bucketRows[0];
+			const resultRecord: InsightResult = {};
+
+			// A. Add GROUP keys
+			for (const gk of groupKeys) {
+				resultRecord[gk] = this.extractValue(representativeRow, gk);
 			}
 
-			processedResults.sort((a, b) => {
-				for (const key of sortKeys) {
-					if (a[key] > b[key]) return isDescending ? -1 : 1;
-					if (a[key] < b[key]) return isDescending ? 1 : -1;
+			// B. Add APPLY computed keys
+			const aggregations = this.applyTransformations(bucketRows, applyRules);
+			Object.assign(resultRecord, aggregations);
+
+			const filteredRecord: InsightResult = {};
+			for (const col of columns) {
+				if (resultRecord[col] !== undefined) {
+					filteredRecord[col] = resultRecord[col];
 				}
-				return 0;
-			});
+			}
+			finalResults.push(filteredRecord);
+		}
+
+		return finalResults;
+	}
+
+	private extractDatasetId(key: string): string {
+		// Assuming key format is "datasetId_field"
+		return key.split("_")[0];
+	}
+
+	private mapColumns(row: any, columns: string[]): InsightResult {
+		const res: InsightResult = {};
+		for (const col of columns) {
+			res[col] = this.extractValue(row, col);
+		}
+		return res;
+	}
+
+	private applySort(results: InsightResult[], order: any): void {
+		let sortKeys: string[] = [];
+		let isDescending = false;
+
+		if (typeof order === "string") {
+			sortKeys = [order];
+		} else {
+			sortKeys = order.keys;
+			isDescending = order.dir === "DOWN";
+		}
+
+		results.sort((a, b) => {
+			for (const key of sortKeys) {
+				if (a[key] > b[key]) return isDescending ? -1 : 1;
+				if (a[key] < b[key]) return isDescending ? 1 : -1;
+			}
+			return 0;
+		});
+	}
+
+	public async performQuery(query: unknown): Promise<InsightResult[]> {
+		// 1. Validation (as you already have)
+		if (!this.isQueryValid(query)) {
+			throw new InsightError("Invalid query");
+		}
+
+		// Cast after validation
+		const queryObj = query as any;
+
+		// 2. Data Retrieval (extract ID from query key dynamically)
+		const id = this.extractDatasetId(queryObj.OPTIONS.COLUMNS[0]);
+		const rawData = await this.loadDatasetFromDisk(id);
+
+		// 3. Filter (WHERE)
+		const filteredData = rawData.filter((row: any) => {
+			if (Object.keys(queryObj.WHERE).length === 0) return true;
+			return this.isRowValid(row, queryObj.WHERE);
+		});
+
+		// 4. Transformation Logic (GROUP & APPLY)
+		let processedResults: InsightResult[] = [];
+		if (queryObj.TRANSFORMATIONS) {
+			// This is the new branch for C2
+			processedResults = this.executeTransformations(
+				filteredData,
+				queryObj.TRANSFORMATIONS,
+				queryObj.OPTIONS.COLUMNS
+			);
+		} else {
+			// Fallback for simple C1 queries
+			processedResults = filteredData.map((row) => this.mapColumns(row, queryObj.OPTIONS.COLUMNS));
+		}
+
+		// 5. Result Limit Check
+		if (processedResults.length > this.resultLimit) {
+			throw new ResultTooLargeError();
+		}
+
+		// 6. Sorting (ORDER)
+		if (queryObj.OPTIONS.ORDER) {
+			this.applySort(processedResults, queryObj.OPTIONS.ORDER);
 		}
 
 		return processedResults;
 	}
-
 	private async loadDatasetFromDisk(id: string): Promise<any[]> {
 		try {
 			const path = `./data/${id}.json`;
@@ -646,5 +786,288 @@ export default class InsightFacade implements IInsightFacade {
 	public async listDatasets(): Promise<InsightDataset[]> {
 		await this.initializeDatasets();
 		return Array.from(this.datasets.values());
+	}
+}
+
+// helper to parse building files
+function parseBuildings(html: string): any[] {
+	const buildings: any[] = [];
+
+	const document = parse5.parse(html);
+
+	// find the valid building list table
+	const buildingListTable = findBuildingTable(document);
+	if (!buildingListTable) return buildings;
+
+	// get tr row elements from tbody
+	const tbody = findNode(buildingListTable, "tbody");
+	if (!tbody) return buildings;
+	const rows = tbody.childNodes.filter((node: any) => node.nodeName === "tr");
+
+	// extract building info from each row
+	for (const row of rows) {
+		const building = getBuildingInfo(row);
+		if (building) buildings.push(building);
+	}
+
+	return buildings;
+}
+
+// Building table helpers start
+function findBuildingTable(node: any): any {
+	if (node.nodeName === "table") {
+		if (tableHasClass(node, "views-field-title")) {
+			return node;
+		}
+	}
+
+	// recursively search child nodes
+	if (node.childNodes) {
+		for (const child of node.childNodes) {
+			const result = findBuildingTable(child);
+			if (result) return result;
+		}
+	}
+
+	// not found
+	return null;
+}
+
+function tableHasClass(table: any, className: string): boolean {
+	const tds = findAllNodes(table, "td");
+
+	// check if any td has the class
+	return tds.some((td: any) => hasClass(td, className));
+}
+
+function findAllNodes(node: any, name: string): any[] {
+	const results: any[] = [];
+
+	// add matching nodes
+	if (node.nodeName === name) {
+		results.push(node);
+	}
+
+	// recursively search child nodes
+	if (node.childNodes) {
+		for (const child of node.childNodes) {
+			results.push(...findAllNodes(child, name));
+		}
+	}
+
+	return results;
+}
+
+function hasClass(node: any, className: string): boolean {
+	const classAttr = getAttribute(node, "class");
+	if (!classAttr) return false;
+	return classAttr.split(" ").includes(className);
+}
+
+function getAttribute(node: any, attrName: string): string | null {
+	if (!node.attrs) return null;
+	const attr = node.attrs.find((a: any) => a.name === attrName);
+	return attr ? attr.value : null;
+}
+//  Building table helpers end
+
+function findNode(node: any, name: string): any {
+	if (node.nodeName === name) return node;
+
+	// recursively search child nodes
+	if (node.childNodes) {
+		for (const child of node.childNodes) {
+			const result = findNode(child, name);
+			if (result) return result;
+		}
+	}
+
+	// not found
+	return null;
+}
+
+// Building info helpers start
+function getBuildingInfo(row: any): any | null {
+	const cells = row.childNodes.filter((node: any) => node.nodeName === "td");
+
+	let link: string | null = null;
+	let shortname: string | null = null;
+	let fullname: string | null = null;
+	let address: string | null = null;
+
+	for (const cell of cells) {
+		// build link and fullname
+		if (hasClass(cell, "views-field-title")) {
+			const anchor = findNode(cell, "a");
+			if (anchor) {
+				link = getAttribute(anchor, "href");
+				fullname = getTextContent(anchor).trim();
+			}
+		}
+
+		// build shortname
+		if (hasClass(cell, "views-field-field-building-code")) {
+			shortname = getTextContent(cell).trim();
+		}
+
+		// build address
+		if (hasClass(cell, "views-field-field-building-address")) {
+			address = getTextContent(cell).trim();
+		}
+	}
+
+	// reject if any field is missing
+	if (!link || !shortname || !fullname || !address) return null;
+
+	return {
+		link,
+		shortname,
+		fullname,
+		address,
+	};
+}
+
+function getTextContent(node: any): string {
+	// base case: text node contains actual text
+	if (node.nodeName === "#text") return node.value;
+
+	// recursively get text from all children
+	if (node.childNodes) {
+		return node.childNodes.map((child: any) => getTextContent(child)).join("");
+	}
+
+	return "";
+}
+// Building info helpers end
+
+// Room table helpers start
+function parseRoomTable(
+	buildingHtml: string,
+	building: { fullname: string; shortname: string; address: string },
+	geo: { lat: number; lon: number }
+): any[] {
+	const document = parse5.parse(buildingHtml);
+	const rooms: any[] = [];
+
+	const roomTable = findRoomTable(document);
+	if (!roomTable) return rooms;
+
+	const tbody = findNode(roomTable, "tbody");
+	if (!tbody) return rooms;
+
+	const rows = tbody.childNodes.filter((n: any) => n.nodeName === "tr");
+
+	for (const row of rows) {
+		const room = getRoomInfo(row, building, geo);
+		if (room) rooms.push(room);
+	}
+
+	return rooms;
+}
+
+function findRoomTable(node: any): any {
+	if (node.nodeName === "table") {
+		const tds = findAllNodes(node, "td");
+		const hasRoomNumber = tds.some((td: any) => hasClass(td, "views-field-field-room-number"));
+		if (hasRoomNumber) return node;
+	}
+
+	if (node.childNodes) {
+		for (const child of node.childNodes) {
+			const result = findRoomTable(child);
+			if (result) return result;
+		}
+	}
+
+	return null;
+}
+
+function getRoomInfo(
+	row: any,
+	building: { fullname: string; shortname: string; address: string },
+	geo: { lat: number; lon: number }
+): any {
+	const cells = row.childNodes.filter((n: any) => n.nodeName == "td");
+	if (cells.length === 0) return null;
+
+	// room fields
+	let number: string | null = null;
+	let href: string | null = null;
+	let seats: number | null = null;
+	let type: string | null = null;
+	let furniture: string | null = null;
+
+	for (const cell of cells) {
+		if (hasClass(cell, "views-field-field-room-number")) {
+			const anchor = findNode(cell, "a");
+			number = anchor ? getTextContent(anchor).trim() : getTextContent(cell).trim();
+			if (anchor && !href) href = getAttribute(anchor, "href");
+		}
+
+		if (hasClass(cell, "views-field-field-room-capacity")) {
+			const raw = getTextContent(cell).trim();
+			seats = parseInt(raw, 10);
+		}
+
+		if (hasClass(cell, "views-field-field-room-furniture")) {
+			furniture = getTextContent(cell).trim();
+		}
+
+		if (hasClass(cell, "views-field-field-room-type")) {
+			type = getTextContent(cell).trim();
+		}
+
+		if (hasClass(cell, "views-field-nothing")) {
+			const anchor = findNode(cell, "a");
+			if (anchor) href = getAttribute(anchor, "href");
+		}
+	}
+
+	// reject if any field is missing
+	if (!number || seats === null || isNaN(seats) || !furniture || !type || !href) {
+		return null;
+	}
+
+	return {
+		fullname: building.fullname,
+		shortname: building.shortname,
+		number,
+		name: `${building.shortname}_${number}`,
+		address: building.address,
+		lat: geo.lat,
+		lon: geo.lon,
+		seats,
+		type,
+		furniture,
+		href,
+	};
+}
+// Room table helpers end
+
+// Geolocation
+async function getGeoLocation(
+	address: string
+): Promise<{ lat: number; lon: number; error?: string | undefined } | null> {
+	try {
+		const encodedAddress = encodeURIComponent(address);
+		const url = `http://cs310.students.cs.ubc.ca:11316/api/v1/project_team059/${encodedAddress}`;
+
+		const response = await fetch(url);
+		if (!response.ok) return null;
+
+		const data = (await response.json()) as {
+			lat?: number;
+			lon?: number;
+			error?: string;
+		};
+
+		// geolocation fail
+		if (data.error) return { lat: 0, lon: 0, error: data.error };
+
+		if (typeof data.lat !== "number" || typeof data.lon !== "number") return null;
+
+		return { lat: data.lat, lon: data.lon };
+	} catch {
+		return null;
 	}
 }

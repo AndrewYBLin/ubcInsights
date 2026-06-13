@@ -15,7 +15,6 @@ export interface GeoResponse {
 }
 
 export class RoomParser {
-
 	public parseIndex(indexHtmlContent: string): ParsedBuilding[] {
 		const parsedDocument = parse5.parse(indexHtmlContent);
 		const discoveredBuildings: ParsedBuilding[] = [];
@@ -161,7 +160,7 @@ export class RoomParser {
 				}
 			}
 
-			if (number) {
+			if (number && href && furniture && type && seats > 0) {
 				// CRITICAL CHECKPOINT 2 CONSTRAINTS:
 				// 1. Generate unique room name signature string format: shortname + "_" + number
 				const name = `${buildingMeta.shortname}_${number}`;
@@ -177,7 +176,7 @@ export class RoomParser {
 					seats: seats,
 					type: type,
 					furniture: furniture,
-					href: href
+					href: href,
 				});
 			}
 		}
@@ -189,29 +188,29 @@ export class RoomParser {
 	 * Hits the university web service asynchronously to retrieve lat/lon coordinates.
 	 */
 	public getCoordinates(address: string): Promise<GeoResponse> {
-		const teamNum = "138"; // Replace with your explicit 3-digit CPSC 310 team number
+		const teamNum = "059"; // Replace with your explicit 3-digit CPSC 310 team number
 		const encodedAddress = encodeURIComponent(address);
 		const url = `http://cs310.students.cs.ubc.ca:11316/api/v1/project_team${teamNum}/${encodedAddress}`;
 
 		return new Promise((resolve, reject) => {
-			http.get(url, (res) => {
-				let rawData = "";
-				res.on("data", (chunk) => {
-					rawData += chunk;
+			http
+				.get(url, (res) => {
+					let rawData = "";
+					res.on("data", (chunk) => {
+						rawData += chunk;
+					});
+					res.on("end", () => {
+						try {
+							const parsedData: GeoResponse = JSON.parse(rawData);
+							resolve(parsedData);
+						} catch (e) {
+							resolve({ error: "Failed to parse coordinate response payload" });
+						}
+					});
+				})
+				.on("error", (err) => {
+					resolve({ error: err.message });
 				});
-				res.on("end", () => {
-					try {
-						const parsedData: GeoResponse = JSON.parse(rawData);
-						resolve(parsedData);
-					} catch (e) {
-						resolve({ error: "Failed to parse coordinate response payload" });
-					}
-				});
-			}).on("error", (err) => {
-				resolve({ error: err.message });
-			});
 		});
 	}
 }
-
-
