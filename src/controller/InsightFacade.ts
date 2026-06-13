@@ -298,39 +298,85 @@ export default class InsightFacade implements IInsightFacade {
 		return false;
 	}
 
-	private isSectionValid(section: any, filter: any): boolean {
+	// this was for C1 but now we gotta deal with rooms too
+	// private isSectionValid(section: any, filter: any): boolean {
+	// 	const key = Object.keys(filter)[0];
+	// 	const content = filter[key];
+	//
+	// 	switch (key) {
+	// 		case "AND":
+	// 			return content.every((subFilter: any) => this.isSectionValid(section, subFilter));
+	// 		case "OR":
+	// 			return content.some((subFilter: any) => this.isSectionValid(section, subFilter));
+	// 		case "NOT":
+	// 			return !this.isSectionValid(section, content);
+	// 		case "GT":
+	// 			return this.handleMComp(section, content, (a, b) => a > b);
+	// 		case "LT":
+	// 			return this.handleMComp(section, content, (a, b) => a < b);
+	// 		case "EQ":
+	// 			return this.handleMComp(section, content, (a, b) => a === b);
+	// 		case "IS":
+	// 			return this.handleSComp(section, content);
+	// 		default:
+	// 			return true;
+	// 	}
+	// }
+
+	private isRowValid(row: any, filter: any): boolean {
 		const key = Object.keys(filter)[0];
 		const content = filter[key];
 
 		switch (key) {
 			case "AND":
-				return content.every((subFilter: any) => this.isSectionValid(section, subFilter));
+				return content.every((subFilter: any) => this.isRowValid(row, subFilter));
 			case "OR":
-				return content.some((subFilter: any) => this.isSectionValid(section, subFilter));
+				return content.some((subFilter: any) => this.isRowValid(row, subFilter));
 			case "NOT":
-				return !this.isSectionValid(section, content);
+				return !this.isRowValid(row, content);
 			case "GT":
-				return this.handleMComp(section, content, (a, b) => a > b);
+				return this.handleMComp(row, content, (a, b) => a > b);
 			case "LT":
-				return this.handleMComp(section, content, (a, b) => a < b);
+				return this.handleMComp(row, content, (a, b) => a < b);
 			case "EQ":
-				return this.handleMComp(section, content, (a, b) => a === b);
+				return this.handleMComp(row, content, (a, b) => a === b);
 			case "IS":
-				return this.handleSComp(section, content);
+				return this.handleSComp(row, content);
 			default:
 				return true;
 		}
 	}
 
-	private handleMComp(section: any, comparison: any, op: (a: number, b: number) => boolean): boolean {
+	// private handleMComp(section: any, comparison: any, op: (a: number, b: number) => boolean): boolean {
+	// 	const queryKey = Object.keys(comparison)[0];
+	// 	const targetValue = comparison[queryKey];
+	// 	const field = queryKey.split("_")[1];
+	//
+	// 	let sectionValue = section[this.fieldToKey[field]];
+	// 	if (field === "year") {
+	// 		sectionValue = section.Section === "overall" ? this.overallNumber : parseInt(sectionValue, 10);
+	// 	}
+	// 	return op(Number(sectionValue), targetValue);
+	// }
+
+	private handleMComp(row: any, comparison: any, op: (a: number, b: number) => boolean): boolean {
 		const queryKey = Object.keys(comparison)[0];
 		const targetValue = comparison[queryKey];
-		const field = queryKey.split("_")[1];
+		const parts = queryKey.split("_");
+		const id = parts[0];
+		const field = parts[1];
 
-		let sectionValue = section[this.fieldToKey[field]];
-		if (field === "year") {
-			sectionValue = section.Section === "overall" ? this.overallNumber : parseInt(sectionValue, 10);
+		// 1. Get the dataset kind dynamically from your storage map
+		const kind = this.datasets.get(id)!.kind;
+
+		// 2. Fetch the raw value (use your existing mapping dictionary)
+		let sectionValue = row[this.fieldToKey[field]];
+
+		// 3. Apply dataset-specific logic only when necessary
+		if (kind === InsightDatasetKind.Sections && field === "year") {
+			sectionValue = row.Section === "overall" ? 1900 : parseInt(sectionValue, 10);
 		}
+
 		return op(Number(sectionValue), targetValue);
 	}
 
@@ -485,8 +531,52 @@ export default class InsightFacade implements IInsightFacade {
 				const token = Object.keys(tokenObj)[0];
 				const targetKey = tokenObj[token];
 
-				// (Your existing APPLY MAX, MIN, COUNT, SUM, AVG reductions go here)
-				// Make sure you keep using decimal.js for SUM and AVG computations!
+				// Extract all values for this target key from the bucket
+				const values = rowsInBucket.map(row => {
+					let val = this.extractValue(row, targetKey);
+					// Ensure numeric values for math operations
+					if (token !== "COUNT") {
+						val = Number(val);
+					}
+					return val;
+				});
+
+				// Apply the appropriate aggregation
+				switch (token) {
+					case "MAX":
+						resultRecord[applyKey] = Math.max(...values);
+						break;
+
+					case "MIN":
+						resultRecord[applyKey] = Math.min(...values);
+						break;
+
+					case "AVG": {
+						let sum = new Decimal(0);
+						for (const val of values) {
+							sum = sum.add(new Decimal(val));
+						}
+						const avg = sum.dividedBy(values.length);
+						resultRecord[applyKey] = Number(avg.toFixed(2));
+						break;
+					}
+
+					case "SUM": {
+						let sum = new Decimal(0);
+						for (const val of values) {
+							sum = sum.add(new Decimal(val));
+						}
+						resultRecord[applyKey] = Number(sum.toFixed(2));
+						break;
+					}
+
+					case "COUNT": {
+						// COUNT counts unique values
+						const uniqueValues = new Set(values);
+						resultRecord[applyKey] = uniqueValues.size;
+						break;
+					}
+				}
 			}
 
 			// Map only desired column sub-sets requested by the user query
@@ -499,6 +589,7 @@ export default class InsightFacade implements IInsightFacade {
 
 		return results;
 	}
+
 
 	/**
 	 * Partitions row records into collections sharing exact matching field properties.
@@ -530,69 +621,154 @@ export default class InsightFacade implements IInsightFacade {
 		return groupBucketsMap;
 	}
 
-	public async performQuery(query: unknown): Promise<InsightResult[]> {
-		this.currentQueryId = "";
-		await this.initializeDatasets();
+	private applyTransformations(bucketRows: any[], applyRules: any[]): Record<string, number> {
+		const results: Record<string, number> = {};
 
-		if (typeof query !== "object" || query === null || Array.isArray(query)) {
-			return Promise.reject(new InsightError("Query must be an object"));
-		}
-		if (!this.isQueryValid(query)) {
-			return Promise.reject(new InsightError("Invalid Query"));
-		}
+		for (const rule of applyRules) {
+			// rule format: { "maxSeats": { "MAX": "rooms_seats" } }
+			const applyKey = Object.keys(rule)[0];
+			const tokenObj = rule[applyKey];
+			const token = Object.keys(tokenObj)[0];
+			const targetKey = tokenObj[token];
 
-		const queryObj = query as any;
-		const rawPayload = await this.loadDatasetFromDisk(this.currentQueryId);
-
-		const filteredResults = rawPayload.filter((row) => {
-			if (Object.keys(queryObj.WHERE).length === 0) return true;
-			return this.isSectionValid(row, queryObj.WHERE);
-		});
-
-		let processedResults: InsightResult[] = [];
-
-		if (queryObj.TRANSFORMATIONS) {
-			processedResults = this.groupAndApply(filteredResults, queryObj.TRANSFORMATIONS, queryObj.OPTIONS.COLUMNS);
-		} else {
-			// If no transformation occurs, map data directly across columns
-			processedResults = filteredResults.map((row) => {
-				const res: InsightResult = {};
-				for (const col of queryObj.OPTIONS.COLUMNS) {
-					res[col] = this.extractValue(row, col);
+			if (token === "MAX") {
+				results[applyKey] = Math.max(...bucketRows.map((r) => this.extractValue(r, targetKey)));
+			} else if (token === "MIN") {
+				results[applyKey] = Math.min(...bucketRows.map((r) => this.extractValue(r, targetKey)));
+			} else if (token === "COUNT") {
+				// Count unique values using a Set
+				const uniqueValues = new Set(bucketRows.map((r) => this.extractValue(r, targetKey)));
+				results[applyKey] = uniqueValues.size;
+			} else if (token === "SUM") {
+				let sum = new Decimal(0);
+				for (const row of bucketRows) {
+					sum = sum.add(new Decimal(this.extractValue(row, targetKey)));
 				}
-				return res;
-			});
+				results[applyKey] = Number(sum.toFixed(2));
+			} else if (token === "AVG") {
+				let sum = new Decimal(0);
+				for (const row of bucketRows) {
+					sum = sum.add(new Decimal(this.extractValue(row, targetKey)));
+				}
+				// AVG formula: total / count, rounded to 2 decimals
+				const avg = sum.dividedBy(bucketRows.length);
+				results[applyKey] = Number(avg.toFixed(2));
+			}
 		}
+		return results;
+	}
 
-		if (processedResults.length > this.resultLimit) {
-			throw new ResultTooLargeError("Result set capped at 5000");
-		}
+	private executeTransformations(filteredData: any[], transformations: any, columns: string[]): InsightResult[] {
+		const groupKeys: string[] = transformations.GROUP;
+		const applyRules: any[] = transformations.APPLY;
 
-		// --- C2 ADVANCED MULTI-KEY SORT ENGINE ---
-		if (queryObj.OPTIONS.ORDER) {
-			const order = queryObj.OPTIONS.ORDER;
-			let sortKeys: string[] = [];
-			let isDescending = false;
+		// Use the grouping helper we discussed previously
+		const groups = this.partitionIntoGroups(filteredData, groupKeys);
+		const finalResults: InsightResult[] = [];
 
-			if (typeof order === "string") {
-				sortKeys = [order];
-			} else {
-				sortKeys = order.keys;
-				isDescending = order.dir === "DOWN";
+		for (const [bucketId, bucketRows] of groups.entries()) {
+			const representativeRow = bucketRows[0];
+			const resultRecord: InsightResult = {};
+
+			// A. Add GROUP keys
+			for (const gk of groupKeys) {
+				resultRecord[gk] = this.extractValue(representativeRow, gk);
 			}
 
-			processedResults.sort((a, b) => {
-				for (const key of sortKeys) {
-					if (a[key] > b[key]) return isDescending ? -1 : 1;
-					if (a[key] < b[key]) return isDescending ? 1 : -1;
+			// B. Add APPLY computed keys
+			const aggregations = this.applyTransformations(bucketRows, applyRules);
+			Object.assign(resultRecord, aggregations);
+
+			const filteredRecord: InsightResult = {};
+			for (const col of columns) {
+				if (resultRecord[col] !== undefined) {
+					filteredRecord[col] = resultRecord[col];
 				}
-				return 0;
-			});
+			}
+			finalResults.push(filteredRecord);
+		}
+
+		return finalResults;
+	}
+
+	private extractDatasetId(key: string): string {
+		// Assuming key format is "datasetId_field"
+		return key.split("_")[0];
+	}
+
+	private mapColumns(row: any, columns: string[]): InsightResult {
+		const res: InsightResult = {};
+		for (const col of columns) {
+			res[col] = this.extractValue(row, col);
+		}
+		return res;
+	}
+
+	private applySort(results: InsightResult[], order: any): void {
+		let sortKeys: string[] = [];
+		let isDescending = false;
+
+		if (typeof order === "string") {
+			sortKeys = [order];
+		} else {
+			sortKeys = order.keys;
+			isDescending = order.dir === "DOWN";
+		}
+
+		results.sort((a, b) => {
+			for (const key of sortKeys) {
+				if (a[key] > b[key]) return isDescending ? -1 : 1;
+				if (a[key] < b[key]) return isDescending ? 1 : -1;
+			}
+			return 0;
+		});
+	}
+
+	public async performQuery(query: unknown): Promise<InsightResult[]> {
+		// 1. Validation (as you already have)
+		if (!this.isQueryValid(query)) {
+			throw new InsightError("Invalid query");
+		}
+
+		// Cast after validation
+		const queryObj = query as any;
+
+		// 2. Data Retrieval (extract ID from query key dynamically)
+		const id = this.extractDatasetId(queryObj.OPTIONS.COLUMNS[0]);
+		const rawData = await this.loadDatasetFromDisk(id);
+
+		// 3. Filter (WHERE)
+		const filteredData = rawData.filter((row: any) => {
+			if (Object.keys(queryObj.WHERE).length === 0) return true;
+			return this.isRowValid(row, queryObj.WHERE);
+		});
+
+		// 4. Transformation Logic (GROUP & APPLY)
+		let processedResults: InsightResult[] = [];
+		if (queryObj.TRANSFORMATIONS) {
+			// This is the new branch for C2
+			processedResults = this.executeTransformations(
+				filteredData,
+				queryObj.TRANSFORMATIONS,
+				queryObj.OPTIONS.COLUMNS
+			);
+		} else {
+			// Fallback for simple C1 queries
+			processedResults = filteredData.map((row) => this.mapColumns(row, queryObj.OPTIONS.COLUMNS));
+		}
+
+		// 5. Result Limit Check
+		if (processedResults.length > this.resultLimit) {
+			throw new ResultTooLargeError();
+		}
+
+		// 6. Sorting (ORDER)
+		if (queryObj.OPTIONS.ORDER) {
+			this.applySort(processedResults, queryObj.OPTIONS.ORDER);
 		}
 
 		return processedResults;
 	}
-
 	private async loadDatasetFromDisk(id: string): Promise<any[]> {
 		try {
 			const path = `./data/${id}.json`;
