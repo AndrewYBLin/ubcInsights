@@ -608,6 +608,11 @@ describe("InsightFacade", function () {
 						"Do not invoke the function directly."
 				);
 			}
+			try {
+				await facade.addDataset("sections", sections, InsightDatasetKind.Sections);
+			} catch (err) {
+				// Already exists
+			}
 			// Destructuring assignment to reduce property accesses
 			const { input, expected, errorExpected } = await loadTestQuery(this.test.title);
 			let result: InsightResult[] = []; // dummy value before being reassigned
@@ -630,10 +635,65 @@ describe("InsightFacade", function () {
 			if (errorExpected) {
 				expect.fail(`performQuery resolved when it should have rejected with ${expected}`);
 			}
-			// TODO: replace this failing assertion with your assertions. You will need to reason about the code in this function
-			// to determine what to put here :)
-			expect(result).to.deep.equal(expected);
-			//return expect.fail("Write your assertion(s) here.");
+			// Check that result has the exact same elements as expected, ignoring order of ties.
+			expect(result).to.be.an("array");
+			expect(result).to.have.lengthOf(expected.length);
+
+			const sortAllFn = (a: any, b: any) => {
+				const keys = Object.keys(a).sort();
+				for (const key of keys) {
+					if (a[key] > b[key]) {
+						return 1;
+					}
+					if (a[key] < b[key]) {
+						return -1;
+					}
+				}
+				return 0;
+			};
+			const sortedResult = [...result].sort(sortAllFn);
+			const sortedExpected = [...expected].sort(sortAllFn);
+			expect(sortedResult).to.deep.equal(sortedExpected);
+
+			// If query specifies ORDER, verify that the result is sorted correctly.
+			const queryObj = input as any;
+			if (queryObj && queryObj.OPTIONS && queryObj.OPTIONS.ORDER) {
+				const order = queryObj.OPTIONS.ORDER;
+				let sortKeys: string[] = [];
+				let isDescending = false;
+
+				if (typeof order === "string") {
+					sortKeys = [order];
+				} else if (typeof order === "object" && order !== null) {
+					sortKeys = order.keys || [];
+					isDescending = order.dir === "DOWN";
+				}
+
+				for (let i = 0; i < result.length - 1; i++) {
+					const a = result[i];
+					const b = result[i + 1];
+					let comparisonResult = 0;
+
+					for (const key of sortKeys) {
+						if (a[key] > b[key]) {
+							comparisonResult = isDescending ? -1 : 1;
+							break;
+						} else if (a[key] < b[key]) {
+							comparisonResult = isDescending ? 1 : -1;
+							break;
+						}
+					}
+
+					if (comparisonResult === 1) {
+						expect.fail(
+							`Result is not sorted correctly. Element at index ${i} is greater than element at index ${i + 1}.\n` +
+							`Key(s): ${sortKeys.join(", ")}, Direction: ${isDescending ? "DOWN" : "UP"}\n` +
+							`Element ${i}: ${JSON.stringify(a)}\n` +
+							`Element ${i + 1}: ${JSON.stringify(b)}`
+						);
+					}
+				}
+			}
 		}
 
 		before(async function () {
@@ -1231,7 +1291,7 @@ describe("InsightFacade", function () {
 			folder?.file(
 				"cpsc310.json",
 				JSON.stringify({
-					result: [{ Subject: "CPSC", Course: "310", Avg: 90, Pass: 100, Fail: 0, Audit: 0, id: "123" }],
+					result: [{ Subject: "CPSC", Course: "310", Avg: 90, Pass: 100, Fail: 0, Audit: 0, id: "123", Year: 2020, Professor: "Smith", Title: "Software Engineering" }],
 				})
 			);
 
