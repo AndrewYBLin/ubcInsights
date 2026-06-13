@@ -10,12 +10,13 @@ import {
 import JSZip from "jszip";
 import * as fs from "fs-extra";
 import * as parse5 from "parse5";
+import Decimal from "decimal.js";
 
 // Internal structure used to save dataset state to disk along with its metadata
 interface PersistedDataset {
 	id: string;
 	kind: InsightDatasetKind;
-	data: any[];
+	rows: any[];
 }
 
 export default class InsightFacade implements IInsightFacade {
@@ -79,7 +80,7 @@ export default class InsightFacade implements IInsightFacade {
 						return {
 							id: meta.id,
 							kind: meta.kind,
-							numRows: meta.data.length,
+							numRows: meta.rows.length,
 						};
 					})
 					.catch(() => null);
@@ -166,7 +167,7 @@ export default class InsightFacade implements IInsightFacade {
 		}
 
 		await fs.ensureDir("./data");
-		const persistencePayload: PersistedDataset = { id, kind, data: dataToStore };
+		const persistencePayload: PersistedDataset = { id, kind, rows: dataToStore };
 		await fs.writeJson(`./data/${id}.json`, persistencePayload);
 
 		this.datasets.set(id, { id, kind, numRows: dataToStore.length });
@@ -596,7 +597,7 @@ export default class InsightFacade implements IInsightFacade {
 		try {
 			const path = `./data/${id}.json`;
 			const persisted: PersistedDataset = await fs.readJson(path);
-			return persisted.data;
+			return persisted.rows;
 		} catch (_err) {
 			throw new InsightError(`Could not read dataset ${id} from disk`);
 		}
@@ -881,7 +882,7 @@ async function getGeoLocation(
 		};
 
 		// geolocation fail
-		if (data.error) return { lat: 0, lon: 0, error: data.error };
+		if (data.error) return null;
 
 		if (typeof data.lat !== "number" || typeof data.lon !== "number") return null;
 
