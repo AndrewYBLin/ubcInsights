@@ -544,7 +544,11 @@ export default class InsightFacade implements IInsightFacade {
 				// Apply the appropriate aggregation
 				switch (token) {
 					case "MAX":
-						resultRecord[applyKey] = Math.max(...values);
+						if (values.length === 0) {
+							resultRecord[applyKey] = 0; // Guard against empty arrays safely
+						} else {
+							resultRecord[applyKey] = values.reduce((a, b) => Math.max(a, b), values[0]);
+						}
 						break;
 
 					case "MIN":
@@ -552,11 +556,19 @@ export default class InsightFacade implements IInsightFacade {
 						break;
 
 					case "AVG": {
-						let sum = new Decimal(0);
+						// 1. Build up a variable called total using the Decimal package
+						let total = new Decimal(0);
 						for (const val of values) {
-							sum = sum.add(new Decimal(val));
+							// Convert each value to a Decimal: e.g., new Decimal(num)
+							const decimalVal = new Decimal(val);
+							// Add the numbers being averaged using Decimal's add() method
+							total = total.add(decimalVal);
 						}
-						const avg = sum.dividedBy(values.length);
+
+						// 2. Calculate average where numRows (values.length) is not converted to a Decimal
+						const avg = total.toNumber() / values.length;
+
+						// 3. Round to the second decimal digit with toFixed(2) and cast back to a number type
 						resultRecord[applyKey] = Number(avg.toFixed(2));
 						break;
 					}
@@ -632,7 +644,12 @@ export default class InsightFacade implements IInsightFacade {
 			const targetKey = tokenObj[token];
 
 			if (token === "MAX") {
-				results[applyKey] = Math.max(...bucketRows.map((r) => this.extractValue(r, targetKey)));
+				const extractedValues = bucketRows.map((r) => Number(this.extractValue(r, targetKey)));
+				if (extractedValues.length === 0) {
+					results[applyKey] = 0;
+				} else {
+					results[applyKey] = extractedValues.reduce((a, b) => Math.max(a, b), extractedValues[0]);
+				}
 			} else if (token === "MIN") {
 				results[applyKey] = Math.min(...bucketRows.map((r) => this.extractValue(r, targetKey)));
 			} else if (token === "COUNT") {
@@ -646,12 +663,20 @@ export default class InsightFacade implements IInsightFacade {
 				}
 				results[applyKey] = Number(sum.toFixed(2));
 			} else if (token === "AVG") {
-				let sum = new Decimal(0);
+				// 1. Build up a variable called total using the Decimal package
+				let total = new Decimal(0);
 				for (const row of bucketRows) {
-					sum = sum.add(new Decimal(this.extractValue(row, targetKey)));
+					const rawVal = this.extractValue(row, targetKey);
+					// Convert each value to a Decimal: e.g., new Decimal(num)
+					const decimalVal = new Decimal(Number(rawVal));
+					// Add the numbers being averaged using Decimal's add() method
+					total = total.add(decimalVal);
 				}
-				// AVG formula: total / count, rounded to 2 decimals
-				const avg = sum.dividedBy(bucketRows.length);
+
+				// 2. Calculate average where numRows (bucketRows.length) is not converted to a Decimal
+				const avg = total.toNumber() / bucketRows.length;
+
+				// 3. Round to the second decimal digit with toFixed(2) and cast back to a number type
 				results[applyKey] = Number(avg.toFixed(2));
 			}
 		}
@@ -717,8 +742,18 @@ export default class InsightFacade implements IInsightFacade {
 
 		results.sort((a, b) => {
 			for (const key of sortKeys) {
-				if (a[key] > b[key]) return isDescending ? -1 : 1;
-				if (a[key] < b[key]) return isDescending ? 1 : -1;
+				const valA = a[key];
+				const valB = b[key];
+
+				if (valA !== valB) {
+					if (valA > valB) {
+						return isDescending ? -1 : 1;
+					}
+					if (valA < valB) {
+						return isDescending ? 1 : -1;
+					}
+				}
+				// If valA === valB, loop continues cleanly to evaluate the next tie-breaker key!
 			}
 			return 0;
 		});

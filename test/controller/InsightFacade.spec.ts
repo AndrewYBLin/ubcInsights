@@ -1444,7 +1444,46 @@ describe("InsightFacade", function () {
 		});
 
 		//sixthone
+
+		it("Should correctly process GROUP and APPLY aggregations via performQuery", async function () {
+			const query = {
+				"WHERE": {
+					"IS": { "sections_dept": "cpsc" }
+				},
+				"OPTIONS": {
+					"COLUMNS": ["sections_dept", "highestAvg", "uniqueInstructors"]
+				},
+				"TRANSFORMATIONS": {
+					"GROUP": ["sections_dept"],
+					"APPLY": [
+						{
+							"highestAvg": { "MAX": "sections_avg" }
+						},
+						{
+							"uniqueInstructors": { "COUNT": "sections_instructor" }
+						}
+					]
+				}
+			};
+
+			// Ensure the dataset is added to the system under the matching prefix ID
+			await facade.addDataset("sections", sections, InsightDatasetKind.Sections);
+
+			const result = await facade.performQuery(query);
+
+			expect(result).to.be.an("array");
+			expect(result).to.have.lengthOf(1);
+
+			// Validate that columns were correctly truncated to match the OPTIONS selection list
+			expect(result[0]).to.have.all.keys("sections_dept", "highestAvg", "uniqueInstructors");
+			expect(result[0].sections_dept).to.equal("cpsc");
+			expect(result[0].highestAvg).to.be.a("number");
+			expect(result[0].uniqueInstructors).to.be.a("number");
+		});
 		// end AI tests
+
+
+
 	});
 
 	// start AI tests
