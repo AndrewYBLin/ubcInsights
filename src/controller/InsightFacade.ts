@@ -544,7 +544,11 @@ export default class InsightFacade implements IInsightFacade {
 				// Apply the appropriate aggregation
 				switch (token) {
 					case "MAX":
-						resultRecord[applyKey] = Math.max(...values);
+						if (values.length === 0) {
+							resultRecord[applyKey] = 0; // Guard against empty arrays safely
+						} else {
+							resultRecord[applyKey] = values.reduce((a, b) => Math.max(a, b), values[0]);
+						}
 						break;
 
 					case "MIN":
@@ -632,7 +636,12 @@ export default class InsightFacade implements IInsightFacade {
 			const targetKey = tokenObj[token];
 
 			if (token === "MAX") {
-				results[applyKey] = Math.max(...bucketRows.map((r) => this.extractValue(r, targetKey)));
+				const extractedValues = bucketRows.map((r) => Number(this.extractValue(r, targetKey)));
+				if (extractedValues.length === 0) {
+					results[applyKey] = 0;
+				} else {
+					results[applyKey] = extractedValues.reduce((a, b) => Math.max(a, b), extractedValues[0]);
+				}
 			} else if (token === "MIN") {
 				results[applyKey] = Math.min(...bucketRows.map((r) => this.extractValue(r, targetKey)));
 			} else if (token === "COUNT") {
@@ -717,8 +726,18 @@ export default class InsightFacade implements IInsightFacade {
 
 		results.sort((a, b) => {
 			for (const key of sortKeys) {
-				if (a[key] > b[key]) return isDescending ? -1 : 1;
-				if (a[key] < b[key]) return isDescending ? 1 : -1;
+				const valA = a[key];
+				const valB = b[key];
+
+				if (valA !== valB) {
+					if (valA > valB) {
+						return isDescending ? -1 : 1;
+					}
+					if (valA < valB) {
+						return isDescending ? 1 : -1;
+					}
+				}
+				// If valA === valB, loop continues cleanly to evaluate the next tie-breaker key!
 			}
 			return 0;
 		});
