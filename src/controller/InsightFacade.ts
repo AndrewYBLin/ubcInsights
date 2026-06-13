@@ -481,8 +481,52 @@ export default class InsightFacade implements IInsightFacade {
 				const token = Object.keys(tokenObj)[0];
 				const targetKey = tokenObj[token];
 
-				// (Your existing APPLY MAX, MIN, COUNT, SUM, AVG reductions go here)
-				// Make sure you keep using decimal.js for SUM and AVG computations!
+				// Extract all values for this target key from the bucket
+				const values = rowsInBucket.map(row => {
+					let val = this.extractValue(row, targetKey);
+					// Ensure numeric values for math operations
+					if (token !== "COUNT") {
+						val = Number(val);
+					}
+					return val;
+				});
+
+				// Apply the appropriate aggregation
+				switch (token) {
+					case "MAX":
+						resultRecord[applyKey] = Math.max(...values);
+						break;
+
+					case "MIN":
+						resultRecord[applyKey] = Math.min(...values);
+						break;
+
+					case "AVG": {
+						let sum = new Decimal(0);
+						for (const val of values) {
+							sum = sum.add(new Decimal(val));
+						}
+						const avg = sum.dividedBy(values.length);
+						resultRecord[applyKey] = Number(avg.toFixed(2));
+						break;
+					}
+
+					case "SUM": {
+						let sum = new Decimal(0);
+						for (const val of values) {
+							sum = sum.add(new Decimal(val));
+						}
+						resultRecord[applyKey] = Number(sum.toFixed(2));
+						break;
+					}
+
+					case "COUNT": {
+						// COUNT counts unique values
+						const uniqueValues = new Set(values);
+						resultRecord[applyKey] = uniqueValues.size;
+						break;
+					}
+				}
 			}
 
 			// Map only desired column sub-sets requested by the user query
