@@ -509,47 +509,91 @@ export default class InsightFacade implements IInsightFacade {
 		return value;
 	}
 
-	// not needed anymore can DELTE
-	// private groupAndApply(filteredData: any[], transform: any, columns: string[]): InsightResult[] {
-	// 	const groupKeys: string[] = transform.GROUP;
-	// 	const applyRules: any[] = transform.APPLY;
-	//
-	// 	// 1. Partition rows into distinct buckets using your stateless utility
-	// 	const structuralGroupsMap = this.partitionIntoGroups(filteredData, groupKeys);
-	//
-	// 	const results: InsightResult[] = [];
-	//
-	// 	// 2. Iterate through each bucket array inside your Map loop
-	// 	for (const [bucketId, rowsInBucket] of structuralGroupsMap.entries()) {
-	// 		const representativeRow = rowsInBucket[0];
-	// 		const resultRecord: InsightResult = {};
-	//
-	// 		// Populate matching grouped fields from the bucket representative row
-	// 		for (const gk of groupKeys) {
-	// 			resultRecord[gk] = this.extractValue(representativeRow, gk);
-	// 		}
-	//
-	// 		// 3. Evaluate your reduction rules (APPLY Phase) over the current bucket rows collection
-	// 		for (const rule of applyRules) {
-	// 			const applyKey = Object.keys(rule)[0];
-	// 			const tokenObj = rule[applyKey];
-	// 			const token = Object.keys(tokenObj)[0];
-	// 			const targetKey = tokenObj[token];
-	//
-	// 			// (Your existing APPLY MAX, MIN, COUNT, SUM, AVG reductions go here)
-	// 			// Make sure you keep using decimal.js for SUM and AVG computations!
-	// 		}
-	//
-	// 		// Map only desired column sub-sets requested by the user query
-	// 		const finalRecord: InsightResult = {};
-	// 		for (const col of columns) {
-	// 			finalRecord[col] = resultRecord[col];
-	// 		}
-	// 		results.push(finalRecord);
-	// 	}
-	//
-	// 	return results;
-	// }
+	private groupAndApply(filteredData: any[], transform: any, columns: string[]): InsightResult[] {
+		const groupKeys: string[] = transform.GROUP;
+		const applyRules: any[] = transform.APPLY;
+
+		// 1. Partition rows into distinct buckets using your stateless utility
+		const structuralGroupsMap = this.partitionIntoGroups(filteredData, groupKeys);
+
+		const results: InsightResult[] = [];
+
+		// 2. Iterate through each bucket array inside your Map loop
+		for (const [bucketId, rowsInBucket] of structuralGroupsMap.entries()) {
+			const representativeRow = rowsInBucket[0];
+			const resultRecord: InsightResult = {};
+
+			// Populate matching grouped fields from the bucket representative row
+			for (const gk of groupKeys) {
+				resultRecord[gk] = this.extractValue(representativeRow, gk);
+			}
+
+			// 3. Evaluate your reduction rules (APPLY Phase) over the current bucket rows collection
+			for (const rule of applyRules) {
+				const applyKey = Object.keys(rule)[0];
+				const tokenObj = rule[applyKey];
+				const token = Object.keys(tokenObj)[0];
+				const targetKey = tokenObj[token];
+
+				// Extract all values for this target key from the bucket
+				const values = rowsInBucket.map(row => {
+					let val = this.extractValue(row, targetKey);
+					// Ensure numeric values for math operations
+					if (token !== "COUNT") {
+						val = Number(val);
+					}
+					return val;
+				});
+
+				// Apply the appropriate aggregation
+				switch (token) {
+					case "MAX":
+						resultRecord[applyKey] = Math.max(...values);
+						break;
+
+					case "MIN":
+						resultRecord[applyKey] = Math.min(...values);
+						break;
+
+					case "AVG": {
+						let sum = new Decimal(0);
+						for (const val of values) {
+							sum = sum.add(new Decimal(val));
+						}
+						const avg = sum.dividedBy(values.length);
+						resultRecord[applyKey] = Number(avg.toFixed(2));
+						break;
+					}
+
+					case "SUM": {
+						let sum = new Decimal(0);
+						for (const val of values) {
+							sum = sum.add(new Decimal(val));
+						}
+						resultRecord[applyKey] = Number(sum.toFixed(2));
+						break;
+					}
+
+					case "COUNT": {
+						// COUNT counts unique values
+						const uniqueValues = new Set(values);
+						resultRecord[applyKey] = uniqueValues.size;
+						break;
+					}
+				}
+			}
+
+			// Map only desired column sub-sets requested by the user query
+			const finalRecord: InsightResult = {};
+			for (const col of columns) {
+				finalRecord[col] = resultRecord[col];
+			}
+			results.push(finalRecord);
+		}
+
+		return results;
+	}
+
 
 	/**
 	 * Partitions row records into collections sharing exact matching field properties.
