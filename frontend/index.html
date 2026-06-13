@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width", initial-scale="1.0">
+    <title>InsightUBC</title>
+    <style> 
+        body { font-family: Arial, sans-serif; max-width: 900px; margin: 40px auto; padding: 0 20px; }
+        h1 { color: #333; }
+        h2 { color: #555; border-bottom: 1px solid #ccc; padding-bottom: 8px; margin-top: 40px; }
+        input, select, textarea { padding: 8px; margin: 4px; border: 1px solid #ccc; border-radius: 4px; }
+        button { padding: 8px 16px; margin: 4px; background: #0055a4; color: white; border: none; border-radius: 4px; cursor: pointer; }
+        button:hover { background: #003f7f; }
+        button.danger { background: #cc0000; }
+        button.danger:hover { background: #990000; }
+        table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+        th, td { border: 1px solid #ccc; padding: 8px; text-align: left; font-size: 0.9em; }
+        th { background: #f0f0f0; }
+        #message { margin: 8px 0; padding: 8px; border-radius: 4px; }
+        .success { background: #d4edda; color: #155724; }
+        .error { background: #f8d7da; color: #721c24; }
+        #datasets-list { margin-top: 12px; }
+    </style>
+</head>
+<body>
+    <h1>InsightUBC</h1>
+
+    <!-- DATASETS -->
+    <h2>Datasets</h2>
+    <div>
+        <input type="text" id="dataset-id" placeholder="Dataset ID" />
+        <select id="dataset-kind">
+            <option value="sections">Sections</option>
+            <option value="rooms">Rooms</option>
+        </select>
+        <input type="file" id="dataset-file" accept=".zip" />
+        <button onclick="addDataset()">Add Dataset</button>
+        <button onclick="listDatasets()">Refresh List</button>
+    </div>
+    <div id="datasets-list"></div>
+
+    <!-- QUERY -->
+    <h2>Query</h2>
+    <div>
+        <textarea id="query-input" rows="10" cols="80" placeholder='Paste JSON query here...'></textarea>
+    </div>
+    <button onclick="performQuery()">Run Query</button>
+    <div id="query-results"></div>
+    <div id="message"></div>
+
+    <!-- FUNCTIONS -->
+    <script>
+        const BASE = "http://localhost:4321";
+
+        function showMessage(text, isError = false) {
+            const el = document.getElementById("message");
+            el.textContent = text;
+            el.className = isError ? "error" : "success";
+        }
+
+        function renderTable(data, containerId) {
+            const container = document.getElementById(containerId);
+            if (!data || data.length === 0) {
+                container.innerHTML = "<p>No results.</p>";
+                return;
+            }
+            const headers = Object.keys(data[0]);
+            const rows = data.map(row =>
+                `<tr>${headers.map(h => `<td>${row[h]}</td>`).join("")}</tr>`
+            ).join("");
+            container.innerHTML = `
+                <table>
+                    <thead><tr>${headers.map(h => `<th>${h}</th>`).join("")}</tr></thead>
+                    <tbody>${rows}</tbody>
+                </table>`;
+        }
+
+        // ADD DATASET
+        async function addDataset() {
+            const id = document.getElementById("dataset-id").value.trim();
+            const kind = document.getElementById("dataset-kind").value;
+            const file = document.getElementById("dataset-file").files[0];
+
+            if (!id || !file) {
+                showMessage("Please provide an ID and a zip file.", true);
+                return;
+            }
+
+            try {
+                // convert zip to base64
+                const buffer = await file.arrayBuffer();
+                const bytes = new Uint8Array(buffer);
+                let binary = "";
+                for (let i = 0; i < bytes.byteLength; i++) {
+                    binary += String.fromCharCode(bytes[i]);
+                }
+                const base64 = btoa(binary);
+
+                const res = await fetch(`${BASE}/dataset/${id}/${kind}`, {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ content: base64 })
+                });
+
+                const data = await res.json();
+                if (res.ok) {
+                    showMessage(`Dataset added. Current datasets: ${data.result.join(", ")}`);
+                    listDatasets();
+                } else {
+                    showMessage(`Error: ${data.error}`, true);
+                }
+            } catch (err) {
+                showMessage(`Request failed: ${err}`, true);
+            }
+        }
+
+        // REMOVE DATASET
+        async function removeDataset(id) {
+            try {
+                const res = await fetch(`${BASE}/dataset/${id}`, { method: "DELETE" });
+                const data = await res.json();
+                if (res.ok) {
+                    showMessage(`Removed dataset: ${data.result}`);
+                    listDatasets();
+                } else {
+                    showMessage(`Error: ${data.error}`, true);
+                }
+            } catch (err) {
+                showMessage(`Request failed: ${err}`, true);
+            }
+        }
+
+        // LIST DATASETS
+        async function listDatasets() {
+            try {
+                const res = await fetch(`${BASE}/datasets`);
+                const data = await res.json();
+                const datasets = data.result;
+
+                if (datasets.length === 0) {
+                    document.getElementById("datasets-list").innerHTML = "<p>No datasets added yet.</p>";
+                    return;
+                }
+
+                const rows = datasets.map(d => `
+                    <tr>
+                        <td>${d.id}</td>
+                        <td>${d.kind}</td>
+                        <td>${d.numRows}</td>
+                        <td><button class="danger" onclick="removeDataset('${d.id}')">Remove</button></td>
+                    </tr>`).join("");
+
+                document.getElementById("datasets-list").innerHTML = `
+                    <table>
+                        <thead><tr><th>ID</th><th>Kind</th><th>Rows</th><th>Action</th></tr></thead>
+                        <tbody>${rows}</tbody>
+                    </table>`;
+            } catch (err) {
+                showMessage(`Failed to list datasets: ${err}`, true);
+            }
+        }
+
+        // PERFORM QUERY
+        async function performQuery() {
+            const raw = document.getElementById("query-input").value.trim();
+            let query;
+            try {
+                query = JSON.parse(raw);
+            } catch {
+                showMessage("Invalid JSON in query box.", true);
+                return;
+            }
+
+            try {
+                const res = await fetch(`${BASE}/query`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(query)
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    showMessage(`Query returned ${data.result.length} results.`);
+                    renderTable(data.result, "query-results");
+                } else {
+                    showMessage(`Error: ${data.error}`, true);
+                    document.getElementById("query-results").innerHTML = "";
+                }
+            } catch (err) {
+                showMessage(`Request failed: ${err}`, true);
+            }
+        }
+
+        // load datasets on page open
+        listDatasets();
+    </script>
+</body>
+</html>
