@@ -1386,23 +1386,23 @@ describe("InsightFacade", function () {
 
 		it("Should correctly process GROUP and APPLY aggregations via performQuery", async function () {
 			const query = {
-				"WHERE": {
-					"IS": { "sections_dept": "cpsc" }
+				WHERE: {
+					IS: { sections_dept: "cpsc" },
 				},
-				"OPTIONS": {
-					"COLUMNS": ["sections_dept", "highestAvg", "uniqueInstructors"]
+				OPTIONS: {
+					COLUMNS: ["sections_dept", "highestAvg", "uniqueInstructors"],
 				},
-				"TRANSFORMATIONS": {
-					"GROUP": ["sections_dept"],
-					"APPLY": [
+				TRANSFORMATIONS: {
+					GROUP: ["sections_dept"],
+					APPLY: [
 						{
-							"highestAvg": { "MAX": "sections_avg" }
+							highestAvg: { MAX: "sections_avg" },
 						},
 						{
-							"uniqueInstructors": { "COUNT": "sections_instructor" }
-						}
-					]
-				}
+							uniqueInstructors: { COUNT: "sections_instructor" },
+						},
+					],
+				},
 			};
 
 			// Ensure the dataset is added to the system under the matching prefix ID
@@ -1437,9 +1437,6 @@ describe("InsightFacade", function () {
 			expect(result).to.be.an("array");
 		});
 		// end AI tests
-
-
-
 	});
 
 	// start AI tests
