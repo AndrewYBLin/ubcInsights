@@ -19,7 +19,7 @@ interface PersistedDataset {
 	kind: InsightDatasetKind;
 	rows: any[];
 }
-// did anything change
+// did anything change reee
 export default class InsightFacade implements IInsightFacade {
 	private datasets: Map<string, InsightDataset>;
 	private currentQueryId: string;
@@ -655,7 +655,7 @@ export default class InsightFacade implements IInsightFacade {
 			return 0;
 		});
 	}
-  
+
 	// QUERY HANDLING END
 
 	private async loadDatasetFromDisk(id: string): Promise<any[]> {
