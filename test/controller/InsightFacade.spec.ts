@@ -1419,6 +1419,23 @@ describe("InsightFacade", function () {
 			expect(result[0].highestAvg).to.be.a("number");
 			expect(result[0].uniqueInstructors).to.be.a("number");
 		});
+
+		it("should apply MAX correctly on rooms", async function () {
+			await facade.addDataset("rooms", rooms, InsightDatasetKind.Rooms);
+			const result = await facade.performQuery({
+				WHERE: {},
+				OPTIONS: {
+					COLUMNS: ["rooms_shortname", "maxSeats"],
+					ORDER: "maxSeats"
+				},
+				TRANSFORMATIONS: {
+					GROUP: ["rooms_shortname"],
+					APPLY: [{ maxSeats: { MAX: "rooms_seats" } }]
+				}
+			});
+			console.log(result.slice(0, 5));
+			expect(result).to.be.an("array");
+		});
 		// end AI tests
 
 

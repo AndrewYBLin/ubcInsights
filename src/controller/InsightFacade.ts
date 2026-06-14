@@ -170,6 +170,7 @@ export default class InsightFacade implements IInsightFacade {
 
 		await fs.ensureDir("./data");
 		const persistencePayload: PersistedDataset = { id, kind, rows: dataToStore };
+		// console.log("Sample row:", JSON.stringify(dataToStore[0], null, 2));
 		await fs.writeJson(`./data/${id}.json`, persistencePayload);
 
 		this.datasets.set(id, { id, kind, numRows: dataToStore.length });
@@ -208,7 +209,7 @@ export default class InsightFacade implements IInsightFacade {
 				rooms.push(...buildingRooms);
 			})
 		);
-
+		console.log(`Total rooms parsed: ${rooms.length}`);
 		return rooms;
 	}
 
@@ -560,10 +561,11 @@ export default class InsightFacade implements IInsightFacade {
 				if (extractedValues.length === 0) {
 					results[applyKey] = 0;
 				} else {
-					results[applyKey] = extractedValues.reduce((a, b) => Math.max(a, b), extractedValues[0]);
+					results[applyKey] = extractedValues.reduce((a, b) => Math.max(a, b), -Infinity);
 				}
 			} else if (token === "MIN") {
-				results[applyKey] = Math.min(...bucketRows.map((r) => this.extractValue(r, targetKey)));
+				const extractedValues = bucketRows.map((r) => Number(this.extractValue(r, targetKey)));
+				results[applyKey] = extractedValues.reduce((a, b) => Math.min(a, b), Infinity);
 			} else if (token === "COUNT") {
 				// Count unique values using a Set
 				const uniqueValues = new Set(bucketRows.map((r) => this.extractValue(r, targetKey)));
@@ -671,6 +673,7 @@ export default class InsightFacade implements IInsightFacade {
 	}
 
 	public async performQuery(query: unknown): Promise<InsightResult[]> {
+		this.currentQueryId = "";
 		// 1. Validation (as you already have)
 		if (!this.isQueryValid(query)) {
 			throw new InsightError("Invalid query");
@@ -732,7 +735,9 @@ export default class InsightFacade implements IInsightFacade {
 
 	public async listDatasets(): Promise<InsightDataset[]> {
 		await this.initializeDatasets();
-		return Array.from(this.datasets.values());
+		const result = Array.from(this.datasets.values());
+
+		return result;
 	}
 }
 
@@ -1000,6 +1005,7 @@ async function getGeoLocation(
 		const url = `http://cs310.students.cs.ubc.ca:11316/api/v1/project_team059/${encodedAddress}`;
 
 		const response = await fetch(url);
+		// console.log(`Geo [${response.status}] ${address}`);
 		if (!response.ok) return null;
 
 		const data = (await response.json()) as {
@@ -1014,7 +1020,8 @@ async function getGeoLocation(
 		if (typeof data.lat !== "number" || typeof data.lon !== "number") return null;
 
 		return { lat: data.lat, lon: data.lon };
-	} catch {
+	} catch(e) {
+		// console.log(`Geo ERROR for ${address}:`, e);
 		return null;
 	}
 }
