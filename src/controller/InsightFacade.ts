@@ -18,7 +18,7 @@ interface PersistedDataset {
 	kind: InsightDatasetKind;
 	rows: any[];
 }
-
+// did anything change
 export default class InsightFacade implements IInsightFacade {
 	private datasets: Map<string, InsightDataset>;
 	private currentQueryId: string;
