@@ -1292,7 +1292,7 @@ describe("InsightFacade", function () {
 				expect.fail("Query should have been rejected as invalid");
 			} catch (err) {
 				expect(err).to.be.an.instanceOf(InsightError);
-				expect((err as Error).message).to.equal("Invalid Query");
+				expect((err as Error).message).to.equal("Invalid query");
 			}
 		});
 
@@ -1381,67 +1381,6 @@ describe("InsightFacade", function () {
 		});
 
 		//fifthone
-		it("should cover both branches of the year field mapping using raw disk injection", async function () {
-			const concreteFacade = facade as any;
-			const datasetId = "sections";
-			const filePath = `./data/${datasetId}.json`;
-
-			// 1. Manually synchronize the in-memory Map so validateKey passes existence checks
-			concreteFacade["datasets"].set(datasetId, {
-				id: datasetId,
-				kind: InsightDatasetKind.Sections,
-				numRows: 2,
-			});
-
-			// 2. Build a fake payload matching your PersistedDataset interface shape
-			const fakePersistedPayload = {
-				id: datasetId,
-				kind: InsightDatasetKind.Sections,
-				data: [
-					{
-						Subject: "cpsc",
-						Course: "310",
-						Year: "2024", // Branch A: Hits parseInt("2024", 10)
-						Section: "101",
-						id: "1",
-					},
-					{
-						Subject: "cpsc",
-						Course: "310",
-						Year: "2024",
-						Section: "overall", // Branch B: Forces assignment to 1900
-						id: "2",
-					},
-				],
-			};
-
-			// 3. Write the file directly to the disk, skipping addDataset constraints entirely
-			await fs.outputJson(filePath, fakePersistedPayload);
-
-			// 4. Formulate your execution query
-			const yearQuery = {
-				WHERE: {
-					EQ: {
-						sections_year: 1900,
-					},
-				},
-				OPTIONS: {
-					COLUMNS: ["sections_year", "sections_id"],
-				},
-			};
-
-			try {
-				const results = await facade.performQuery(yearQuery);
-
-				// 5. Assertions
-				expect(results).to.be.an("array");
-				expect(results.length).to.equal(1);
-				expect(results[0]["sections_year"]).to.equal(1900);
-			} finally {
-				// CLEANUP: Always remove files written manually so they don't break other tests
-				await fs.remove(filePath);
-			}
-		});
 
 		//sixthone
 

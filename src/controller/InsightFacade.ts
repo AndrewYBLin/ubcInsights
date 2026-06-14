@@ -2,8 +2,8 @@ import {
 	IInsightFacade,
 	InsightDataset,
 	InsightDatasetKind,
-	InsightResult,
 	InsightError,
+	InsightResult,
 	NotFoundError,
 	ResultTooLargeError,
 } from "./IInsightFacade";
@@ -65,10 +65,12 @@ export default class InsightFacade implements IInsightFacade {
 		this.currentQueryId = "";
 	}
 
+	private initialized = false;
+
 	private async initializeDatasets(): Promise<void> {
-		if (this.datasets.size > 0) {
-			return;
-		}
+		if (this.initialized) return;
+		this.initialized = true;
+
 		if (await fs.pathExists("./data")) {
 			const files = await fs.readdir("./data");
 			const jsonFiles = files.filter((file) => file.endsWith(".json"));
@@ -171,6 +173,8 @@ export default class InsightFacade implements IInsightFacade {
 		await fs.writeJson(`./data/${id}.json`, persistencePayload);
 
 		this.datasets.set(id, { id, kind, numRows: dataToStore.length });
+
+		this.initialized = true;
 		return Array.from(this.datasets.keys());
 	}
 
@@ -223,6 +227,7 @@ export default class InsightFacade implements IInsightFacade {
 		} catch (_err) {
 			return Promise.reject(new InsightError("Failed to delete data"));
 		}
+		this.initialized = true;
 		return id;
 	}
 
@@ -493,115 +498,22 @@ export default class InsightFacade implements IInsightFacade {
 	}
 
 	// --- C2 TRANSFORMATIONS EXECUTION ENGINE ---
-	private extractValue(section: any, key: string): any {
+	private extractValue(row: any, key: string): any {
 		const field = key.split("_")[1];
-		let value = section[this.fieldToKey[field]];
-		if (field === "year") {
-			value = section.Section === "overall" ? this.overallNumber : parseInt(value, 10);
-		}
-		if (field === "uuid") {
-			value = String(value);
+		const id = key.split("_")[0];
+		const kind = this.datasets.get(id)!.kind;
+		let value = row[this.fieldToKey[field]];
+
+		if (kind === InsightDatasetKind.Sections) {
+			if (field === "year") {
+				value = row.Section === "overall" ? this.overallNumber : parseInt(value, 10);
+			}
+			if (field === "uuid") {
+				value = String(value);
+			}
 		}
 		return value;
 	}
-
-	private groupAndApply(filteredData: any[], transform: any, columns: string[]): InsightResult[] {
-		const groupKeys: string[] = transform.GROUP;
-		const applyRules: any[] = transform.APPLY;
-
-		// 1. Partition rows into distinct buckets using your stateless utility
-		const structuralGroupsMap = this.partitionIntoGroups(filteredData, groupKeys);
-
-		const results: InsightResult[] = [];
-
-		// 2. Iterate through each bucket array inside your Map loop
-		for (const [bucketId, rowsInBucket] of structuralGroupsMap.entries()) {
-			const representativeRow = rowsInBucket[0];
-			const resultRecord: InsightResult = {};
-
-			// Populate matching grouped fields from the bucket representative row
-			for (const gk of groupKeys) {
-				resultRecord[gk] = this.extractValue(representativeRow, gk);
-			}
-
-			// 3. Evaluate your reduction rules (APPLY Phase) over the current bucket rows collection
-			for (const rule of applyRules) {
-				const applyKey = Object.keys(rule)[0];
-				const tokenObj = rule[applyKey];
-				const token = Object.keys(tokenObj)[0];
-				const targetKey = tokenObj[token];
-
-				// Extract all values for this target key from the bucket
-				const values = rowsInBucket.map(row => {
-					let val = this.extractValue(row, targetKey);
-					// Ensure numeric values for math operations
-					if (token !== "COUNT") {
-						val = Number(val);
-					}
-					return val;
-				});
-
-				// Apply the appropriate aggregation
-				switch (token) {
-					case "MAX":
-						if (values.length === 0) {
-							resultRecord[applyKey] = 0; // Guard against empty arrays safely
-						} else {
-							resultRecord[applyKey] = values.reduce((a, b) => Math.max(a, b), values[0]);
-						}
-						break;
-
-					case "MIN":
-						resultRecord[applyKey] = Math.min(...values);
-						break;
-
-					case "AVG": {
-						// 1. Build up a variable called total using the Decimal package
-						let total = new Decimal(0);
-						for (const val of values) {
-							// Convert each value to a Decimal: e.g., new Decimal(num)
-							const decimalVal = new Decimal(val);
-							// Add the numbers being averaged using Decimal's add() method
-							total = total.add(decimalVal);
-						}
-
-						// 2. Calculate average where numRows (values.length) is not converted to a Decimal
-						const avg = total.toNumber() / values.length;
-
-						// 3. Round to the second decimal digit with toFixed(2) and cast back to a number type
-						resultRecord[applyKey] = Number(avg.toFixed(2));
-						break;
-					}
-
-					case "SUM": {
-						let sum = new Decimal(0);
-						for (const val of values) {
-							sum = sum.add(new Decimal(val));
-						}
-						resultRecord[applyKey] = Number(sum.toFixed(2));
-						break;
-					}
-
-					case "COUNT": {
-						// COUNT counts unique values
-						const uniqueValues = new Set(values);
-						resultRecord[applyKey] = uniqueValues.size;
-						break;
-					}
-				}
-			}
-
-			// Map only desired column sub-sets requested by the user query
-			const finalRecord: InsightResult = {};
-			for (const col of columns) {
-				finalRecord[col] = resultRecord[col];
-			}
-			results.push(finalRecord);
-		}
-
-		return results;
-	}
-
 
 	/**
 	 * Partitions row records into collections sharing exact matching field properties.
@@ -716,8 +628,7 @@ export default class InsightFacade implements IInsightFacade {
 		return finalResults;
 	}
 
-	private extractDatasetId(key: string): string {
-		// Assuming key format is "datasetId_field"
+	private extractDatasetId(key: any): string {
 		return key.split("_")[0];
 	}
 
@@ -769,7 +680,12 @@ export default class InsightFacade implements IInsightFacade {
 		const queryObj = query as any;
 
 		// 2. Data Retrieval (extract ID from query key dynamically)
-		const id = this.extractDatasetId(queryObj.OPTIONS.COLUMNS[0]);
+		// const id = this.extractDatasetId(queryObj.OPTIONS.COLUMNS[0]);
+		const keys = queryObj.TRANSFORMATIONS?.GROUP ?? queryObj.OPTIONS.COLUMNS;
+		const key = keys.find((k: string) => k.includes("_"));
+		if (!key) throw new InsightError("Cannot determine dataset id");
+		const id = this.extractDatasetId(key);
+
 		const rawData = await this.loadDatasetFromDisk(id);
 
 		// 3. Filter (WHERE)
