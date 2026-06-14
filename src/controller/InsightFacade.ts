@@ -146,6 +146,7 @@ export default class InsightFacade implements IInsightFacade {
 		// persistence
 		await fs.ensureDir("./data");
 		const persistencePayload: PersistedDataset = { id, kind, rows: dataToStore };
+		// console.log("Sample row:", JSON.stringify(dataToStore[0], null, 2));
 		await fs.writeJson(`./data/${id}.json`, persistencePayload);
 
 		this.datasets.set(id, { id, kind, numRows: dataToStore.length });
@@ -153,7 +154,7 @@ export default class InsightFacade implements IInsightFacade {
 		this.initialized = true;
 		return Array.from(this.datasets.keys());
 	}
-
+  
 	public async removeDataset(id: string): Promise<string> {
 		await this.initializeDatasets();
 		if (id === "" || id.includes("_") || id.trim().length === 0) {
@@ -516,6 +517,7 @@ export default class InsightFacade implements IInsightFacade {
 			const tokenObj = rule[applyKey];
 			const token = Object.keys(tokenObj)[0];
 			const targetKey = tokenObj[token];
+
 			const values = bucketRows.map((r) => Number(this.extractValue(r, targetKey)));
 
 			switch (token) {
@@ -595,7 +597,7 @@ export default class InsightFacade implements IInsightFacade {
 			return 0;
 		});
 	}
-
+  
 	// QUERY HANDLING END
 
 	private async loadDatasetFromDisk(id: string): Promise<any[]> {
@@ -610,6 +612,8 @@ export default class InsightFacade implements IInsightFacade {
 
 	public async listDatasets(): Promise<InsightDataset[]> {
 		await this.initializeDatasets();
-		return Array.from(this.datasets.values());
+		const result = Array.from(this.datasets.values());
+
+		return result;
 	}
 }
