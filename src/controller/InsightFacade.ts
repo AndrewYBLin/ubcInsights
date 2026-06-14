@@ -170,6 +170,7 @@ export default class InsightFacade implements IInsightFacade {
 
 		await fs.ensureDir("./data");
 		const persistencePayload: PersistedDataset = { id, kind, rows: dataToStore };
+		// console.log("Sample row:", JSON.stringify(dataToStore[0], null, 2));
 		await fs.writeJson(`./data/${id}.json`, persistencePayload);
 
 		this.datasets.set(id, { id, kind, numRows: dataToStore.length });
@@ -208,7 +209,7 @@ export default class InsightFacade implements IInsightFacade {
 				rooms.push(...buildingRooms);
 			})
 		);
-
+		console.log(`Total rooms parsed: ${rooms.length}`);
 		return rooms;
 	}
 
@@ -574,6 +575,7 @@ export default class InsightFacade implements IInsightFacade {
 			const tokenObj = rule[applyKey];
 			const token = Object.keys(tokenObj)[0];
 			const targetKey = tokenObj[token];
+
 			const values = bucketRows.map((r) => Number(this.extractValue(r, targetKey)));
 
 			switch (token) {
@@ -653,7 +655,7 @@ export default class InsightFacade implements IInsightFacade {
 			return 0;
 		});
 	}
-
+  
 	// QUERY HANDLING END
 
 	private async loadDatasetFromDisk(id: string): Promise<any[]> {
@@ -668,7 +670,9 @@ export default class InsightFacade implements IInsightFacade {
 
 	public async listDatasets(): Promise<InsightDataset[]> {
 		await this.initializeDatasets();
-		return Array.from(this.datasets.values());
+		const result = Array.from(this.datasets.values());
+
+		return result;
 	}
 }
 
@@ -936,6 +940,7 @@ async function getGeoLocation(
 		const url = `http://cs310.students.cs.ubc.ca:11316/api/v1/project_team059/${encodedAddress}`;
 
 		const response = await fetch(url);
+		// console.log(`Geo [${response.status}] ${address}`);
 		if (!response.ok) return null;
 
 		const data = (await response.json()) as {
@@ -950,7 +955,8 @@ async function getGeoLocation(
 		if (typeof data.lat !== "number" || typeof data.lon !== "number") return null;
 
 		return { lat: data.lat, lon: data.lon };
-	} catch {
+	} catch(e) {
+		// console.log(`Geo ERROR for ${address}:`, e);
 		return null;
 	}
 }
