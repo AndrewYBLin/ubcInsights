@@ -7,6 +7,12 @@ import {
 	NotFoundError,
 	ResultTooLargeError,
 } from "./IInsightFacade";
+import { Filter, 
+	AndFilter, 
+	OrFilter, 
+	NotFilter, 
+	MCompFilter, 
+	SCompFilter } from "./composite";
 import JSZip from "jszip";
 import * as fs from "fs-extra";
 import * as parse5 from "parse5";
@@ -256,9 +262,12 @@ export default class InsightFacade implements IInsightFacade {
 
 		// 3. Filter (WHERE)
 		const where = queryObj.WHERE;
-		const filteredData =
-			Object.keys(where).length === 0 ? rawData : rawData.filter((row: any) => this.isRowValid(row, where));
-
+			const filteredData = Object.keys(where).length === 0
+				? rawData
+				: (() => {
+					const filter = this.buildFilter(where);
+					return rawData.filter((row: any) => filter.evaluate(row));
+				})();
 		// 4. Transformation Logic (GROUP & APPLY)
 		const results: InsightResult[] = queryObj.TRANSFORMATIONS
 			? // This is the new branch for C2
@@ -277,6 +286,43 @@ export default class InsightFacade implements IInsightFacade {
 		}
 
 		return results;
+	}
+
+
+	private buildFilter(where: any): Filter {
+    const key = Object.keys(where)[0];
+    const content = where[key];
+
+    switch (key) {
+        case "AND":
+            return new AndFilter(content.map((f: any) => this.buildFilter(f)));
+        case "OR":
+            return new OrFilter(content.map((f: any) => this.buildFilter(f)));
+        case "NOT":
+            return new NotFilter(this.buildFilter(content));
+        case "GT":
+            return new MCompFilter(
+                Object.keys(content)[0], content[Object.keys(content)[0]],
+                (a, b) => a > b, this.fieldToKey, this.datasets
+            );
+        case "LT":
+            return new MCompFilter(
+                Object.keys(content)[0], content[Object.keys(content)[0]],
+                (a, b) => a < b, this.fieldToKey, this.datasets
+            );
+        case "EQ":
+            return new MCompFilter(
+                Object.keys(content)[0], content[Object.keys(content)[0]],
+                (a, b) => a === b, this.fieldToKey, this.datasets
+            );
+        case "IS":
+            return new SCompFilter(
+                Object.keys(content)[0], content[Object.keys(content)[0]],
+                this.fieldToKey
+            );
+        default:
+            throw new InsightError(`Unknown filter key: ${key}`);
+		}
 	}
 
 	// QUERY VALIDATION START
@@ -449,62 +495,64 @@ export default class InsightFacade implements IInsightFacade {
 
 	// QUERY HANDLING START
 
+	// can delete isRowValid, handleMComp, handleSComp 
+
 	// Where filter handling
-	private isRowValid(row: any, filter: any): boolean {
-		const key = Object.keys(filter)[0];
-		const content = filter[key];
+	// private isRowValid(row: any, filter: any): boolean {
+	// 	const key = Object.keys(filter)[0];
+	// 	const content = filter[key];
 
-		switch (key) {
-			case "AND":
-				return content.every((subFilter: any) => this.isRowValid(row, subFilter));
-			case "OR":
-				return content.some((subFilter: any) => this.isRowValid(row, subFilter));
-			case "NOT":
-				return !this.isRowValid(row, content);
-			case "GT":
-				return this.handleMComp(row, content, (a, b) => a > b);
-			case "LT":
-				return this.handleMComp(row, content, (a, b) => a < b);
-			case "EQ":
-				return this.handleMComp(row, content, (a, b) => a === b);
-			case "IS":
-				return this.handleSComp(row, content);
-			default:
-				return true;
-		}
-	}
+	// 	switch (key) {
+	// 		case "AND":
+	// 			return content.every((subFilter: any) => this.isRowValid(row, subFilter));
+	// 		case "OR":
+	// 			return content.some((subFilter: any) => this.isRowValid(row, subFilter));
+	// 		case "NOT":
+	// 			return !this.isRowValid(row, content);
+	// 		case "GT":
+	// 			return this.handleMComp(row, content, (a, b) => a > b);
+	// 		case "LT":
+	// 			return this.handleMComp(row, content, (a, b) => a < b);
+	// 		case "EQ":
+	// 			return this.handleMComp(row, content, (a, b) => a === b);
+	// 		case "IS":
+	// 			return this.handleSComp(row, content);
+	// 		default:
+	// 			return true;
+	// 	}
+	// }
 
-	private handleMComp(row: any, comparison: any, op: (a: number, b: number) => boolean): boolean {
-		const queryKey = Object.keys(comparison)[0];
-		const targetValue = comparison[queryKey];
-		const parts = queryKey.split("_");
-		const id = parts[0];
-		const field = parts[1];
+	// private handleMComp(row: any, comparison: any, op: (a: number, b: number) => boolean): boolean {
+	// 	const queryKey = Object.keys(comparison)[0];
+	// 	const targetValue = comparison[queryKey];
+	// 	const parts = queryKey.split("_");
+	// 	const id = parts[0];
+	// 	const field = parts[1];
 
-		// 1. Get the dataset kind dynamically from your storage map
-		const kind = this.datasets.get(id)!.kind;
+	// 	// 1. Get the dataset kind dynamically from your storage map
+	// 	const kind = this.datasets.get(id)!.kind;
 
-		// 2. Fetch the raw value (use your existing mapping dictionary)
-		let sectionValue = row[this.fieldToKey[field]];
+	// 	// 2. Fetch the raw value (use your existing mapping dictionary)
+	// 	let sectionValue = row[this.fieldToKey[field]];
 
-		// 3. Apply dataset-specific logic only when necessary
-		if (kind === InsightDatasetKind.Sections && field === "year") {
-			sectionValue = row.Section === "overall" ? 1900 : parseInt(sectionValue, 10);
-		}
+	// 	// 3. Apply dataset-specific logic only when necessary
+	// 	if (kind === InsightDatasetKind.Sections && field === "year") {
+	// 		sectionValue = row.Section === "overall" ? 1900 : parseInt(sectionValue, 10);
+	// 	}
 
-		return op(Number(sectionValue), targetValue);
-	}
+	// 	return op(Number(sectionValue), targetValue);
+	// }
 
-	private handleSComp(section: any, comparison: any): boolean {
-		const queryKey = Object.keys(comparison)[0];
-		const field = queryKey.split("_")[1];
-		const inputString = comparison[queryKey];
-		const sectionValue = String(section[this.fieldToKey[field]]);
+	// private handleSComp(section: any, comparison: any): boolean {
+	// 	const queryKey = Object.keys(comparison)[0];
+	// 	const field = queryKey.split("_")[1];
+	// 	const inputString = comparison[queryKey];
+	// 	const sectionValue = String(section[this.fieldToKey[field]]);
 
-		let regString = inputString.replace(/[.+^${}()|[\]\\]/g, "\\$&");
-		regString = "^" + regString.replace(/\*/g, ".*") + "$";
-		return new RegExp(regString).test(sectionValue);
-	}
+	// 	let regString = inputString.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+	// 	regString = "^" + regString.replace(/\*/g, ".*") + "$";
+	// 	return new RegExp(regString).test(sectionValue);
+	// }
 
 	// Transformation logic
 	private executeTransformations(filteredData: any[], transformations: any, columns: string[]): InsightResult[] {
