@@ -1,11 +1,11 @@
-import { InsightDataset, 
+import { InsightDataset,
     InsightDatasetKind } from "./IInsightFacade";
 
 // composite pattern component abstract/interface
 export interface Filter {
     evaluate(row: any): boolean;
 }
-
+// leaf filters
 export class MCompFilter implements Filter {
     constructor(
         private field: string,
@@ -22,7 +22,11 @@ export class MCompFilter implements Filter {
         const kind = this.datasets.get(id)!.kind;
         let val = row[this.fieldToKey[field]];
         if (kind === InsightDatasetKind.Sections && field === "year") {
-            val = row.Section === "overall" ? 1900 : parseInt(val, 10);
+			if (row.Section === "overall") {
+				val = 1900;
+			} else {
+				val = parseInt(val, 10);
+			}
         }
         return this.op(Number(val), this.value);
     }
@@ -44,7 +48,7 @@ export class SCompFilter implements Filter {
     }
 }
 
-// composite filteres 
+// composite filteres
 export class AndFilter implements Filter {
     constructor(private filters: Filter[]) {}
     evaluate(row: any): boolean {
