@@ -2,7 +2,7 @@
 
 This get the server up and running
 
-2. Open a new terminal and enter: start frontend/index.html
+2. Open a new terminal and enter: start frontend/index.html You could also open the index.html file in your web browser.
 
 This opens the webpage and now you can access frontend :\)
 
