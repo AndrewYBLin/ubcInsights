@@ -7,11 +7,11 @@ import {
 	NotFoundError,
 	ResultTooLargeError,
 } from "./IInsightFacade";
-import { Filter, 
-	AndFilter, 
-	OrFilter, 
-	NotFilter, 
-	MCompFilter, 
+import { Filter,
+	AndFilter,
+	OrFilter,
+	NotFilter,
+	MCompFilter,
 	SCompFilter } from "./composite";
 import JSZip from "jszip";
 import * as fs from "fs-extra";
@@ -114,6 +114,88 @@ export default class InsightFacade implements IInsightFacade {
 		}
 	}
 
+	private async processZipFiles(coursesFolder: JSZip): Promise<any[]> {
+		const promises: Array<Promise<string>> = [];
+		coursesFolder.forEach((relativePath, file) => {
+			promises.push(file.async("string"));
+		});
+
+		const fileContents = await Promise.all(promises);
+		const sections: any[] = [];
+
+		for (const content of fileContents) {
+			try {
+				const parsed = JSON.parse(content);
+				if (parsed.result && Array.isArray(parsed.result)) {
+					sections.push(...parsed.result);
+				}
+			} catch (_err) {
+				continue;
+			}
+		}
+		return sections;
+	}
+
+	// CUSTOM ENDPOINT ADDED HERE
+	public async getAverageGrade(id: string): Promise<object> {
+		const datasets = await this.listDatasets();
+		const dataset = datasets.find((d) => d.id === id);
+		if (!dataset) {
+			throw new NotFoundError(`Dataset ${id} not found`);
+		}
+		if (dataset.kind !== InsightDatasetKind.Sections) {
+			throw new InsightError(`Dataset ${id} is not a sections dataset`);
+		}
+
+		const result = await this.performQuery({
+			WHERE: {
+				GT: { [`${id}_avg`]: 0 }
+			},
+			OPTIONS: {
+				COLUMNS: [`${id}_dept`, "totalPass", "totalFail", "totalAudit", "weightedAvg"],
+			},
+			TRANSFORMATIONS: {
+				GROUP: [`${id}_dept`],
+				APPLY: [
+					{ totalPass: { SUM: `${id}_pass` } },
+					{ totalFail: { SUM: `${id}_fail` } },
+					{ totalAudit: { SUM: `${id}_audit` } },
+					{ weightedAvg: { AVG: `${id}_avg` } },
+				]
+			}
+		});
+
+		const totalSections = result.length;
+		if (totalSections === 0) {
+			throw new InsightError(`Dataset ${id} has no sections`);
+		}
+
+		let weightedSum = 0;
+		let totalEnrollment = 0;
+
+		for (const row of result) {
+			const pass = Number(row["totalPass"]);
+			const fail = Number(row["totalFail"]);
+			const audit = Number(row["totalAudit"]);
+			const avg = Number(row["weightedAvg"]);
+
+			const enrollment = pass + fail + audit;
+			weightedSum += avg * enrollment;
+			totalEnrollment += enrollment;
+		}
+
+		const trueAvgGrade = totalEnrollment > 0
+			? Math.round((weightedSum / totalEnrollment) * 100) / 100
+			: 0;
+
+		return {
+			datasetId: id,
+			averageGrade: trueAvgGrade,
+			totalEnrollment,
+			totalSections,
+		};
+	}
+
 	public async addDataset(id: string, content: string, kind: InsightDatasetKind): Promise<string[]> {
 		// validation
 		await this.initializeDatasets();
@@ -181,7 +263,10 @@ export default class InsightFacade implements IInsightFacade {
 	}
 
 	public async performQuery(query: unknown): Promise<InsightResult[]> {
-		// 1. Validation (as you already have)
+		await this.initializeDatasets();
+		this.currentQueryId = "";
+
+		// 1. Validation
 		if (typeof query !== "object" || query === null || Array.isArray(query)) {
 			throw new InsightError("Error: Query is not an object");
 		}
@@ -280,6 +365,7 @@ export default class InsightFacade implements IInsightFacade {
 			return false;
 		}
 
+		if (typeof query.WHERE !== "object" || query.WHERE === null || Array.isArray(query.WHERE)) return false;
 		if (Object.keys(query.WHERE).length > 0 && !this.isFilterValid(query.WHERE)) return false;
 		if (!this.isOptionsValid(query.OPTIONS, hasTransform)) return false;
 		if (hasTransform && !this.isTransformationsValid(query.TRANSFORMATIONS, query.OPTIONS.COLUMNS)) return false;
@@ -437,7 +523,7 @@ export default class InsightFacade implements IInsightFacade {
 
 	// QUERY HANDLING START
 
-	// can delete isRowValid, handleMComp, handleSComp 
+	// can delete isRowValid, handleMComp, handleSComp
 
 	// Where filter handling
 	// private isRowValid(row: any, filter: any): boolean {
@@ -570,23 +656,26 @@ export default class InsightFacade implements IInsightFacade {
 
 			switch (token) {
 				case "MAX":
-					results[applyKey] = values.reduce((a, b) => Math.max(a, b), values[0] ?? 0);
+					results[applyKey] = values.reduce((a, b) => (a > b ? a : b));
 					break;
 				case "MIN":
-					results[applyKey] = Math.min(...values.map(Number));
+					results[applyKey] = values.reduce((a, b) => (a < b ? a : b));
 					break;
 				case "AVG": {
-					const total = values.reduce((sum, v) => sum.add(new Decimal(Number(v))), new Decimal(0));
-					results[applyKey] = Number(total.div(bucketRows.length).toFixed(2));
+					const total = values.reduce((sum, v) => sum.add(new Decimal(v)), new Decimal(0));
+					const avg = total.toNumber() / bucketRows.length;
+					results[applyKey] = Number(avg.toFixed(2));
 					break;
 				}
 				case "SUM": {
-					const total = values.reduce((sum, v) => sum.add(new Decimal(Number(v))), new Decimal(0));
-					results[applyKey] = Number(total.toFixed(2));
+					const sumTotal = values.reduce((a, b) => a + b, 0);
+					results[applyKey] = Number(sumTotal.toFixed(2));
 					break;
 				}
 				case "COUNT":
-					results[applyKey] = new Set(values).size;
+					results[applyKey] = new Set(
+						bucketRows.map((r) => this.extractValue(r, targetKey))
+					).size;
 					break;
 			}
 		}

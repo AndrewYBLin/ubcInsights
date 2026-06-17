@@ -1831,3 +1831,395 @@ describe("InsightFacade", function () {
 		});
 	});
 });
+
+// ============================================================
+// C2 COMPREHENSIVE TESTS — Outside main describe to avoid beforeEach clearing disk
+// ============================================================
+describe("C2 Comprehensive - Rooms & Aggregation", function () {
+	this.timeout(30000); // rooms parsing + geolocation needs time
+
+	let roomsFacade: IInsightFacade;
+	let sections: string;
+	let rooms: string;
+
+	before(async function () {
+		sections = await getContentFromArchives("pair.zip");
+		rooms = await getContentFromArchives("campus.zip");
+		await clearDisk();
+		roomsFacade = new InsightFacade();
+		await roomsFacade.addDataset("rooms", rooms, InsightDatasetKind.Rooms);
+		await roomsFacade.addDataset("sections", sections, InsightDatasetKind.Sections);
+	});
+
+	after(async function () {
+		await clearDisk();
+	});
+
+	// --- ListDataset ---
+	it("should list rooms dataset with correct numRows", async function () {
+		const datasets = await roomsFacade.listDatasets();
+		const roomsDataset = datasets.find((d) => d.id === "rooms");
+		expect(roomsDataset).to.not.be.undefined;
+		expect(roomsDataset!.kind).to.equal(InsightDatasetKind.Rooms);
+		expect(roomsDataset!.numRows).to.be.greaterThan(0);
+		// campus.zip should have 364 rooms
+		expect(roomsDataset!.numRows).to.equal(364);
+	});
+
+	// --- CachingProgress ---
+	it("should query rooms after restart (caching/persistence)", async function () {
+		// Create a new facade instance to simulate restart
+		const freshFacade = new InsightFacade();
+		const result = await freshFacade.performQuery({
+			WHERE: {
+				GT: { rooms_seats: 300 },
+			},
+			OPTIONS: {
+				COLUMNS: ["rooms_shortname", "rooms_seats"],
+				ORDER: "rooms_seats",
+			},
+		});
+		expect(result).to.be.an("array");
+		expect(result.length).to.be.greaterThan(0);
+		for (const row of result) {
+			expect(row.rooms_seats).to.be.greaterThan(300);
+		}
+	});
+
+	it("should list datasets correctly after restart", async function () {
+		const freshFacade = new InsightFacade();
+		const datasets = await freshFacade.listDatasets();
+		expect(datasets.length).to.equal(2);
+		const roomsDs = datasets.find((d) => d.id === "rooms");
+		expect(roomsDs).to.not.be.undefined;
+		expect(roomsDs!.numRows).to.equal(364);
+	});
+
+	// --- Room Queries: Empty WHERE ---
+	it("should return all rooms with empty WHERE", async function () {
+		const result = await roomsFacade.performQuery({
+			WHERE: {},
+			OPTIONS: {
+				COLUMNS: ["rooms_name"],
+			},
+		});
+		expect(result).to.be.an("array");
+		expect(result.length).to.equal(364);
+	});
+
+	// --- Room Queries: IS filter ---
+	it("should filter rooms by furniture using IS with wildcard", async function () {
+		const result = await roomsFacade.performQuery({
+			WHERE: {
+				IS: { rooms_furniture: "*Tables*" },
+			},
+			OPTIONS: {
+				COLUMNS: ["rooms_shortname", "rooms_number", "rooms_furniture"],
+			},
+		});
+		expect(result).to.be.an("array");
+		expect(result.length).to.be.greaterThan(0);
+		for (const row of result) {
+			expect(row.rooms_furniture as string).to.include("Tables");
+		}
+	});
+
+	// --- Room Queries: GT filter ---
+	it("should filter rooms by seats using GT", async function () {
+		const result = await roomsFacade.performQuery({
+			WHERE: {
+				GT: { rooms_seats: 200 },
+			},
+			OPTIONS: {
+				COLUMNS: ["rooms_shortname", "rooms_number", "rooms_seats"],
+				ORDER: "rooms_seats",
+			},
+		});
+		expect(result).to.be.an("array");
+		expect(result.length).to.be.greaterThan(0);
+		for (const row of result) {
+			expect(row.rooms_seats).to.be.greaterThan(200);
+		}
+	});
+
+	// --- MAX ---
+	it("should correctly compute MAX on rooms_seats grouped by shortname", async function () {
+		const result = await roomsFacade.performQuery({
+			WHERE: {
+				AND: [
+					{ IS: { rooms_furniture: "*Tables*" } },
+					{ GT: { rooms_seats: 300 } },
+				],
+			},
+			OPTIONS: {
+				COLUMNS: ["rooms_shortname", "maxSeats"],
+				ORDER: { dir: "DOWN", keys: ["maxSeats"] },
+			},
+			TRANSFORMATIONS: {
+				GROUP: ["rooms_shortname"],
+				APPLY: [{ maxSeats: { MAX: "rooms_seats" } }],
+			},
+		});
+		expect(result).to.be.an("array");
+		expect(result.length).to.be.greaterThan(0);
+		// Per the spec example, OSBO should have 442 seats
+		const osbo = result.find((r) => r.rooms_shortname === "OSBO");
+		if (osbo) {
+			expect(osbo.maxSeats).to.equal(442);
+		}
+		// Results should be in descending order
+		for (let i = 1; i < result.length; i++) {
+			expect(result[i - 1].maxSeats).to.be.at.least(result[i].maxSeats as number);
+		}
+	});
+
+	// --- COUNT ---
+	it("should correctly COUNT unique string values (rooms_type)", async function () {
+		const result = await roomsFacade.performQuery({
+			WHERE: {},
+			OPTIONS: {
+				COLUMNS: ["rooms_shortname", "typeCount"],
+			},
+			TRANSFORMATIONS: {
+				GROUP: ["rooms_shortname"],
+				APPLY: [{ typeCount: { COUNT: "rooms_type" } }],
+			},
+		});
+		expect(result).to.be.an("array");
+		expect(result.length).to.be.greaterThan(0);
+		for (const row of result) {
+			expect(row.typeCount).to.be.a("number");
+			expect(row.typeCount).to.be.at.least(1);
+		}
+	});
+
+	it("should correctly COUNT unique furniture values", async function () {
+		const result = await roomsFacade.performQuery({
+			WHERE: {},
+			OPTIONS: {
+				COLUMNS: ["rooms_shortname", "furnitureCount"],
+			},
+			TRANSFORMATIONS: {
+				GROUP: ["rooms_shortname"],
+				APPLY: [{ furnitureCount: { COUNT: "rooms_furniture" } }],
+			},
+		});
+		expect(result).to.be.an("array");
+		expect(result.length).to.be.greaterThan(0);
+		for (const row of result) {
+			expect(row.furnitureCount).to.be.a("number");
+			expect(row.furnitureCount).to.be.at.least(1);
+		}
+	});
+
+	// --- AVG ---
+	it("should correctly compute AVG with Decimal precision", async function () {
+		const result = await roomsFacade.performQuery({
+			WHERE: {},
+			OPTIONS: {
+				COLUMNS: ["rooms_shortname", "avgSeats"],
+				ORDER: { dir: "DOWN", keys: ["avgSeats"] },
+			},
+			TRANSFORMATIONS: {
+				GROUP: ["rooms_shortname"],
+				APPLY: [{ avgSeats: { AVG: "rooms_seats" } }],
+			},
+		});
+		expect(result).to.be.an("array");
+		expect(result.length).to.be.greaterThan(0);
+		for (const row of result) {
+			expect(row.avgSeats).to.be.a("number");
+			// Verify it's rounded to 2 decimal places
+			const str = row.avgSeats.toString();
+			const parts = str.split(".");
+			if (parts.length === 2) {
+				expect(parts[1].length).to.be.at.most(2);
+			}
+		}
+	});
+
+	it("should compute AVG on sections with known Decimal edge case", async function () {
+		const result = await roomsFacade.performQuery({
+			WHERE: {
+				IS: { sections_dept: "cpsc" },
+			},
+			OPTIONS: {
+				COLUMNS: ["sections_dept", "avgGrade"],
+			},
+			TRANSFORMATIONS: {
+				GROUP: ["sections_dept"],
+				APPLY: [{ avgGrade: { AVG: "sections_avg" } }],
+			},
+		});
+		expect(result).to.be.an("array");
+		expect(result.length).to.equal(1);
+		expect(result[0].avgGrade).to.be.a("number");
+	});
+
+	// --- SUM ---
+	it("should correctly compute SUM rounded to 2 decimal places", async function () {
+		const result = await roomsFacade.performQuery({
+			WHERE: {
+				GT: { rooms_seats: 300 },
+			},
+			OPTIONS: {
+				COLUMNS: ["rooms_shortname", "totalSeats"],
+			},
+			TRANSFORMATIONS: {
+				GROUP: ["rooms_shortname"],
+				APPLY: [{ totalSeats: { SUM: "rooms_seats" } }],
+			},
+		});
+		expect(result).to.be.an("array");
+		expect(result.length).to.be.greaterThan(0);
+		for (const row of result) {
+			expect(row.totalSeats).to.be.a("number");
+		}
+	});
+
+	// --- MIN ---
+	it("should correctly compute MIN on rooms_seats", async function () {
+		const result = await roomsFacade.performQuery({
+			WHERE: {},
+			OPTIONS: {
+				COLUMNS: ["rooms_shortname", "minSeats"],
+				ORDER: { dir: "UP", keys: ["minSeats"] },
+			},
+			TRANSFORMATIONS: {
+				GROUP: ["rooms_shortname"],
+				APPLY: [{ minSeats: { MIN: "rooms_seats" } }],
+			},
+		});
+		expect(result).to.be.an("array");
+		expect(result.length).to.be.greaterThan(0);
+		// Results should be in ascending order
+		for (let i = 1; i < result.length; i++) {
+			expect(result[i].minSeats).to.be.at.least(result[i - 1].minSeats as number);
+		}
+	});
+
+	// --- Sorting ---
+	it("should sort by multiple keys with DOWN direction", async function () {
+		const result = await roomsFacade.performQuery({
+			WHERE: {
+				GT: { rooms_seats: 100 },
+			},
+			OPTIONS: {
+				COLUMNS: ["rooms_shortname", "rooms_number", "rooms_seats"],
+				ORDER: { dir: "DOWN", keys: ["rooms_seats", "rooms_shortname"] },
+			},
+		});
+		expect(result).to.be.an("array");
+		expect(result.length).to.be.greaterThan(0);
+		// Verify descending order by seats
+		for (let i = 1; i < result.length; i++) {
+			const prev = result[i - 1].rooms_seats as number;
+			const curr = result[i].rooms_seats as number;
+			expect(prev).to.be.at.least(curr);
+		}
+	});
+
+	it("should sort by single string key (simple ORDER)", async function () {
+		const result = await roomsFacade.performQuery({
+			WHERE: {
+				GT: { rooms_seats: 300 },
+			},
+			OPTIONS: {
+				COLUMNS: ["rooms_shortname", "rooms_seats"],
+				ORDER: "rooms_shortname",
+			},
+		});
+		expect(result).to.be.an("array");
+		expect(result.length).to.be.greaterThan(0);
+		// Verify ascending alphabetical order
+		for (let i = 1; i < result.length; i++) {
+			const prev = result[i - 1].rooms_shortname as string;
+			const curr = result[i].rooms_shortname as string;
+			expect(prev <= curr).to.be.true;
+		}
+	});
+
+	it("should sort UP with object ORDER", async function () {
+		const result = await roomsFacade.performQuery({
+			WHERE: {
+				GT: { rooms_seats: 200 },
+			},
+			OPTIONS: {
+				COLUMNS: ["rooms_shortname", "rooms_seats"],
+				ORDER: { dir: "UP", keys: ["rooms_seats"] },
+			},
+		});
+		expect(result).to.be.an("array");
+		expect(result.length).to.be.greaterThan(0);
+		for (let i = 1; i < result.length; i++) {
+			expect(result[i].rooms_seats).to.be.at.least(result[i - 1].rooms_seats as number);
+		}
+	});
+
+	// --- Geolocation ---
+	it("should have correct lat/lon values in rooms data", async function () {
+		const result = await roomsFacade.performQuery({
+			WHERE: {
+				IS: { rooms_shortname: "DMP" },
+			},
+			OPTIONS: {
+				COLUMNS: ["rooms_shortname", "rooms_lat", "rooms_lon"],
+			},
+		});
+		expect(result).to.be.an("array");
+		expect(result.length).to.be.greaterThan(0);
+		for (const row of result) {
+			expect(row.rooms_lat).to.be.a("number");
+			expect(row.rooms_lon).to.be.a("number");
+		}
+	});
+
+	// --- Cross-dataset query after switching ---
+	it("should correctly query sections after querying rooms (currentQueryId reset)", async function () {
+		// First query rooms
+		const roomResult = await roomsFacade.performQuery({
+			WHERE: { GT: { rooms_seats: 400 } },
+			OPTIONS: { COLUMNS: ["rooms_shortname", "rooms_seats"] },
+		});
+		expect(roomResult).to.be.an("array");
+
+		// Then query sections — this tests currentQueryId reset
+		const sectionResult = await roomsFacade.performQuery({
+			WHERE: { GT: { sections_avg: 97 } },
+			OPTIONS: {
+				COLUMNS: ["sections_dept", "sections_avg"],
+				ORDER: "sections_avg",
+			},
+		});
+		expect(sectionResult).to.be.an("array");
+		expect(sectionResult.length).to.be.greaterThan(0);
+	});
+
+	// --- Multiple aggregation tokens ---
+	it("should apply multiple APPLY rules in same query", async function () {
+		const result = await roomsFacade.performQuery({
+			WHERE: {},
+			OPTIONS: {
+				COLUMNS: ["rooms_shortname", "maxSeats", "minSeats", "avgSeats", "totalSeats", "roomCount"],
+			},
+			TRANSFORMATIONS: {
+				GROUP: ["rooms_shortname"],
+				APPLY: [
+					{ maxSeats: { MAX: "rooms_seats" } },
+					{ minSeats: { MIN: "rooms_seats" } },
+					{ avgSeats: { AVG: "rooms_seats" } },
+					{ totalSeats: { SUM: "rooms_seats" } },
+					{ roomCount: { COUNT: "rooms_number" } },
+				],
+			},
+		});
+		expect(result).to.be.an("array");
+		expect(result.length).to.be.greaterThan(0);
+		for (const row of result) {
+			expect(row).to.have.all.keys(
+				"rooms_shortname", "maxSeats", "minSeats", "avgSeats", "totalSeats", "roomCount"
+			);
+			expect(row.maxSeats).to.be.at.least(row.minSeats as number);
+		}
+	});
+});

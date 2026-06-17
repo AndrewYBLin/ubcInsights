@@ -44,6 +44,25 @@ export default class Server {
 		this.express.get("/datasets", this.listDatasets.bind(this));
 		// Perform query
 		this.express.post("/query", this.performQuery.bind(this));
+		// custom endpoint
+		this.express.get("/dataset/:id/avggrade", this.getAverageGrade.bind(this));
+	}
+
+	private async getAverageGrade(req: Request, res: Response): Promise<void> {
+		try {
+			const { id } = req.params;
+			const result = await this.facade.getAverageGrade(id);
+			res.status(StatusCodes.OK).json({ result });
+		} catch (err) {
+			console.error("getAverageGrade error:", err);
+			if (err instanceof NotFoundError) {
+				res.status(StatusCodes.NOT_FOUND).json({ error: (err as Error).message });
+			} else if (err instanceof InsightError) {
+				res.status(StatusCodes.BAD_REQUEST).json({ error: (err as Error).message });
+			} else {
+				res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({ error: "Unexpected error" });
+			}
+		}
 	}
 
 	private async addDataset(req: Request, res: Response): Promise<void> {
