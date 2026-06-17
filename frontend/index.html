@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width", initial-scale="1.0">
     <title>InsightUBC</title>
-    <style> 
+    <style>
         body { font-family: Arial, sans-serif; max-width: 900px; margin: 40px auto; padding: 0 20px; }
         h1 { color: #333; }
         h2 { color: #555; border-bottom: 1px solid #ccc; padding-bottom: 8px; margin-top: 40px; }
@@ -47,6 +47,16 @@
     <button onclick="performQuery()">Run Query</button>
     <div id="query-results"></div>
     <div id="message"></div>
+
+	<!-- AVERAGE GRADE -->
+	<h2>UBC Average Grade (for this year's dataset)</h2>
+	<div>
+		<select id="avggrade-dataset-id">
+			<option value="">Select a sections dataset...</option>
+		</select>
+		<button onclick="loadAvgGrade()">Get Average Grade</button>
+	</div>
+	<div id="avggrade-results"></div>
 
     <!-- FUNCTIONS -->
     <script>
@@ -155,6 +165,8 @@
                         <thead><tr><th>ID</th><th>Kind</th><th>Rows</th><th>Action</th></tr></thead>
                         <tbody>${rows}</tbody>
                     </table>`;
+
+				refreshAvgGradeDropdown();
             } catch (err) {
                 showMessage(`Failed to list datasets: ${err}`, true);
             }
@@ -189,6 +201,58 @@
                 showMessage(`Request failed: ${err}`, true);
             }
         }
+
+		async function refreshAvgGradeDropdown() {
+			try {
+				const res = await fetch(`${BASE}/datasets`);
+				const data = await res.json();
+				const sel = document.getElementById("avggrade-dataset-id");
+				const current = sel.value;
+				sel.innerHTML = '<option value="">Select a sections dataset...</option>';
+				// Only show sections datasets
+				data.result
+					.filter(d => d.kind === "sections")
+					.forEach(d => {
+						const opt = document.createElement("option");
+						opt.value = d.id;
+						opt.textContent = d.id;
+						sel.appendChild(opt);
+					});
+				if (current) sel.value = current;
+			} catch (_) {}
+		}
+
+		async function loadAvgGrade() {
+			const id = document.getElementById("avggrade-dataset-id").value;
+			if (!id) { showMessage("Select a dataset first.", true); return; }
+
+			const container = document.getElementById("avggrade-results");
+			container.innerHTML = "<p>Loading...</p>";
+
+			try {
+				const res = await fetch(`${BASE}/dataset/${id}/avggrade`);
+				const data = await res.json();
+				if (!res.ok) { showMessage(`Error: ${data.error}`, true); container.innerHTML = ""; return; }
+
+				const s = data.result;
+				container.innerHTML = `
+            <table>
+                <thead><tr><th>Metric</th><th>Value</th></tr></thead>
+                <tbody>
+                    <tr><td>Dataset</td><td>${s.datasetId}</td></tr>
+                    <tr><td>Enrollment-Weighted Average Grade</td><td>${s.averageGrade}%</td></tr>
+                    <!-- <tr><td>Total Enrollment</td><td>${s.totalEnrollment.toLocaleString()}</td></tr> -->
+                    <!-- <tr><td>Total Sections</td><td>${s.totalSections.toLocaleString()}</td></tr> -->
+                </tbody>
+            </table>`;
+				showMessage(`Average grade loaded for "${id}".`);
+			} catch (err) {
+				showMessage(`Request failed: ${err}`, true);
+				container.innerHTML = "";
+			}
+		}
+
+		refreshAvgGradeDropdown();
 
         // load datasets on page open
         listDatasets();

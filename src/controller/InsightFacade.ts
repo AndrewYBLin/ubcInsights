@@ -133,6 +133,66 @@ export default class InsightFacade implements IInsightFacade {
 		return sections;
 	}
 
+	// CUSTOM ENDPOINT ADDED HERE
+	public async getAverageGrade(id: string): Promise<object> {
+		const datasets = await this.listDatasets();
+		const dataset = datasets.find((d) => d.id === id);
+		if (!dataset) {
+			throw new NotFoundError(`Dataset ${id} not found`);
+		}
+		if (dataset.kind !== InsightDatasetKind.Sections) {
+			throw new InsightError(`Dataset ${id} is not a sections dataset`);
+		}
+
+		const result = await this.performQuery({
+			WHERE: {
+				GT: { [`${id}_avg`]: 0 }
+			},
+			OPTIONS: {
+				COLUMNS: [`${id}_dept`, "totalPass", "totalFail", "totalAudit", "weightedAvg"],
+			},
+			TRANSFORMATIONS: {
+				GROUP: [`${id}_dept`],
+				APPLY: [
+					{ totalPass: { SUM: `${id}_pass` } },
+					{ totalFail: { SUM: `${id}_fail` } },
+					{ totalAudit: { SUM: `${id}_audit` } },
+					{ weightedAvg: { AVG: `${id}_avg` } },
+				]
+			}
+		});
+
+		const totalSections = result.length;
+		if (totalSections === 0) {
+			throw new InsightError(`Dataset ${id} has no sections`);
+		}
+
+		let weightedSum = 0;
+		let totalEnrollment = 0;
+
+		for (const row of result) {
+			const pass = Number(row["totalPass"]);
+			const fail = Number(row["totalFail"]);
+			const audit = Number(row["totalAudit"]);
+			const avg = Number(row["weightedAvg"]);
+
+			const enrollment = pass + fail + audit;
+			weightedSum += avg * enrollment;
+			totalEnrollment += enrollment;
+		}
+
+		const trueAvgGrade = totalEnrollment > 0
+			? Math.round((weightedSum / totalEnrollment) * 100) / 100
+			: 0;
+
+		return {
+			datasetId: id,
+			averageGrade: trueAvgGrade,
+			totalEnrollment,
+			totalSections,
+		};
+	}
+
 	public async addDataset(id: string, content: string, kind: InsightDatasetKind): Promise<string[]> {
 		await this.initializeDatasets();
 		if (id === "" || id.includes("_") || id.trim().length === 0) {
