@@ -188,8 +188,6 @@ export default class InsightFacade implements IInsightFacade {
 		return {
 			datasetId: id,
 			averageGrade: trueAvgGrade,
-			totalEnrollment,
-			totalSections,
 		};
 	}
 
