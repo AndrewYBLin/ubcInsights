@@ -51,3 +51,19 @@ Perform a query of a dataset
     "averageGrade": 72.4
   }
 }
+
+### GET /dataset/:id/avggrade
+Gets the overall average of the selected dataset
+#### URL parameters
+- id: string that represents the dataset to compute the average for
+#### Request properties 
+No request properties 
+#### Sample response
+{
+  "result":{
+ 	"datasetId":"sections",
+   	"averageGrade":76.76,
+	"totalEnrollment":3966544,
+ 	"totalSections":189
+  }
+}
