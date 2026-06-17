@@ -53,7 +53,8 @@ Perform a query of a dataset
 }
 
 ### GET /dataset/:id/avggrade
-Gets the overall average of the selected (sections) dataset
+Gets the overall average of the selected (sections) dataset  
+Average is calculated by: sum(section enrollments * average section grade)/(total enrollments)
 #### URL parameters
 - id: string that represents the dataset to compute the average for
 #### Sample response
